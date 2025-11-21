@@ -7,7 +7,8 @@ const firebaseConfig = {
   apiKey: "AIzaSyCkPGe2Mv4lblA2WLj_ONkNN1ZJdwrPKts",
   authDomain: "vexetot-72d39.firebaseapp.com",
   projectId: "vexetot-72d39",
-  storageBucket: "vexetot-72d39.firebasestorage.app",
+  storageBucket: "vexetot-72d39.appspot.com",
+
   messagingSenderId: "757257647229",
   appId: "1:757257647229:web:165e70808536fbc145ed14",
   measurementId: "G-SRENHDMTEE"

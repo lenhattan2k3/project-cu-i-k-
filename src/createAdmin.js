@@ -47,4 +47,4 @@ const createAdminUser = async () => {
 // Execute the function
 createAdminUser()
   .then(uid => console.log("Admin created with UID:", uid))
-  .catch(error => console.log("Failed to create admin:", error));
+  .catch(error => console.log("Failed to create admin:", error)); 

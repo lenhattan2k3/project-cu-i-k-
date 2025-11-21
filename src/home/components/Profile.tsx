@@ -7,6 +7,7 @@ import airplane from "../../assets/airplane.jpg";
 import heroBus from "../../assets/hero-bus.jpg";
 import trainStation from "../../assets/train-station.jpg";
 
+
 interface UserProfile {
   name: string;
   email: string;
@@ -61,53 +62,65 @@ export default function Profile() {
   }, [navigate]);
 
   // 💾 Lưu thông tin chỉnh sửa
-  const handleSave = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const user: User | null = auth.currentUser;
-    if (!user) return;
+const handleSave = async (e: React.FormEvent) => {
+  e.preventDefault();
+  const user: User | null = auth.currentUser;
+  if (!user) return;
 
-    try {
-      await updateProfile(user, {
-        displayName: profile.name,
-        photoURL: profile.photoURL,
-      });
+  try {
+    // ✅ Đảm bảo chỉ dùng URL hợp lệ
+    const safePhotoURL =
+      profile.photoURL.startsWith("https://") ||
+      profile.photoURL.startsWith("http://")
+        ? profile.photoURL
+        : user.photoURL || "https://cdn-icons-png.flaticon.com/512/149/149071.png";
 
-      const uid = user.uid;
-      localStorage.setItem(`userProfile_${uid}`, JSON.stringify(profile));
+    await updateProfile(user, {
+      displayName: profile.name,
+      photoURL: safePhotoURL,
+    });
 
-      alert("✅ Thông tin đã được lưu!");
-      setIsEditing(false);
-    } catch (err) {
-      console.error(err);
-      alert("❌ Cập nhật thất bại!");
-    }
-  };
+    localStorage.setItem(
+      `userProfile_${user.uid}`,
+      JSON.stringify({ ...profile, photoURL: safePhotoURL })
+    );
+
+    alert("✅ Thông tin đã được lưu!");
+    setIsEditing(false);
+  } catch (err) {
+    console.error(err);
+    alert("❌ Cập nhật thất bại!");
+  }
+};
+
 
   // 📷 Upload avatar (Base64, không dùng Storage)
-  const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+// 📷 Chọn ảnh trong máy và lưu vĩnh viễn (không dùng Cloudinary)
+const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const file = e.target.files?.[0];
+  if (!file) return;
 
-    setLoadingAvatar(true);
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      const base64 = reader.result as string;
+  const reader = new FileReader();
+  reader.onloadend = () => {
+    const base64 = reader.result as string;
 
-      setProfile((prev) => ({ ...prev, photoURL: base64 }));
+    // ✅ Cập nhật state hiển thị ảnh ngay
+    setProfile((prev) => ({ ...prev, photoURL: base64 }));
 
-      const user = auth.currentUser;
-      if (user) {
-        localStorage.setItem(
-          `userProfile_${user.uid}`,
-          JSON.stringify({ ...profile, photoURL: base64 })
-        );
-      }
+    // ✅ Lưu vào localStorage để giữ ảnh vĩnh viễn
+    const user = auth.currentUser;
+    if (user) {
+      localStorage.setItem(
+        `userProfile_${user.uid}`,
+        JSON.stringify({ ...profile, photoURL: base64 })
+      );
+    }
 
-      setLoadingAvatar(false);
-      alert("✅ Ảnh đại diện đã được cập nhật!");
-    };
-    reader.readAsDataURL(file);
+    alert("✅ Ảnh đã được lưu vào hồ sơ!");
   };
+  reader.readAsDataURL(file);
+};
+
 
   const handleEditToggle = () => setIsEditing(true);
   const handleCancel = () => setIsEditing(false);

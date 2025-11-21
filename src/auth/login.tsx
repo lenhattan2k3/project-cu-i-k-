@@ -1,12 +1,18 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import {
   signInWithEmailAndPassword,
   GoogleAuthProvider,
+  signInWithRedirect,
+  getRedirectResult,
   signInWithPopup,
+  setPersistence,
+  browserLocalPersistence,
+  signOut,
 } from "firebase/auth";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 import { auth, db } from "../firebase/config";
+import { socket } from "../utils/socket"; // ✅ realtime
 
 export default function Login() {
   const [email, setEmail] = useState("");
@@ -15,7 +21,12 @@ export default function Login() {
   const [isLoading, setIsLoading] = useState(false);
   const navigate = useNavigate();
 
-  // Hàm tạo ảnh đại diện mặc định (theo chữ cái đầu)
+  // ✅ Khi mở trang Login → signOut để tránh tự động đăng nhập
+  useEffect(() => {
+    signOut(auth).catch(() => {});
+  }, []);
+
+  // 🎨 Avatar mặc định
   const generateAvatar = (nameOrEmail: string) => {
     const firstLetter = (nameOrEmail?.[0] || "?").toUpperCase();
     const canvas = document.createElement("canvas");
@@ -32,28 +43,43 @@ export default function Login() {
     return canvas.toDataURL("image/png");
   };
 
-  // === Đăng nhập bằng Email/Password ===
+  // 🟢 Đăng nhập bằng email/mật khẩu
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     setIsLoading(true);
+
     try {
       const cred = await signInWithEmailAndPassword(auth, email, password);
       const uid = cred.user.uid;
-
       const snap = await getDoc(doc(db, "users", uid));
-      let data = snap.exists() ? snap.data() : null;
-      const role = data?.role ?? "user";
+      const data = snap.exists() ? snap.data() : null;
 
-      // Nếu user chưa có ảnh → tạo avatar mặc định
+      if (!data) {
+        setError("Tài khoản không tồn tại trong hệ thống!");
+        setIsLoading(false);
+        return;
+      }
+
+      // 🚫 Kiểm tra trạng thái
+      if (data.status === "pending") {
+        setError("Tài khoản của bạn đang chờ Admin duyệt!");
+        setIsLoading(false);
+        return;
+      }
+      if (data.status === "rejected") {
+        setError("Tài khoản của bạn đã bị từ chối!");
+        setIsLoading(false);
+        return;
+      }
+
+      const role = data?.role ?? "user";
+      const partnerId = data?.partnerId ?? "";
       let photoURL = data?.photoURL;
+
       if (!photoURL) {
         photoURL = generateAvatar(data?.name || email);
-        await setDoc(
-          doc(db, "users", uid),
-          { photoURL },
-          { merge: true }
-        );
+        await setDoc(doc(db, "users", uid), { photoURL }, { merge: true });
       }
 
       const userData = {
@@ -62,63 +88,139 @@ export default function Login() {
         ten: data?.name || "",
         sdt: data?.phone || "",
         role,
+        partnerId,
         photoURL,
       };
+
       localStorage.setItem("user", JSON.stringify(userData));
+      socket.emit("registerUser", uid);
 
       if (role === "admin") navigate("/homeadmin");
       else if (role === "partner") navigate("/homepartner");
       else navigate("/homeuser");
     } catch (err) {
+      console.error(err);
       setError("Email hoặc mật khẩu không đúng!");
     } finally {
       setIsLoading(false);
     }
   };
 
-  // === Đăng nhập bằng Google ===
+  // 🟣 Đăng nhập Google
   const handleGoogleLogin = async () => {
     setError(null);
     setIsLoading(true);
     const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: "select_account" });
 
     try {
-      const result = await signInWithPopup(auth, provider);
-      const user = result.user;
+      await setPersistence(auth, browserLocalPersistence);
+      const isLocal = ["localhost", "127.0.0.1"].includes(window.location.hostname);
 
-      // Kiểm tra Firestore, nếu chưa có thì tạo
-      const userRef = doc(db, "users", user.uid);
-      const snap = await getDoc(userRef);
-      if (!snap.exists()) {
-        await setDoc(userRef, {
+      if (isLocal) {
+        // Dùng popup khi chạy localhost
+        let result;
+        try {
+          result = await signInWithPopup(auth, provider);
+        } catch (popupErr: any) {
+          const code = popupErr?.code || popupErr?.error?.code;
+          if (
+            code === "auth/popup-closed-by-user" ||
+            code === "auth/cancelled-popup-request" ||
+            code === "auth/popup-blocked"
+          ) {
+            await signInWithRedirect(auth, provider);
+            return;
+          }
+          throw popupErr;
+        }
+
+        const user = result.user;
+        const userRef = doc(db, "users", user.uid);
+        const snap = await getDoc(userRef);
+
+        if (!snap.exists()) {
+          await setDoc(userRef, {
+            email: user.email,
+            name: user.displayName || "",
+            photoURL: user.photoURL || "",
+            role: "user",
+            partnerId: "",
+            status: "approved", // Google user auto approved
+            createdAt: new Date(),
+          });
+        }
+
+        const userData = {
+          _id: user.uid,
           email: user.email,
-          name: user.displayName,
-          photoURL: user.photoURL,
+          ten: user.displayName || "",
+          sdt: "",
           role: "user",
-          createdAt: new Date(),
-        });
+          partnerId: "",
+          photoURL: user.photoURL || "",
+        };
+
+        localStorage.setItem("user", JSON.stringify(userData));
+        socket.emit("registerUser", user.uid);
+        navigate("/homeuser");
+      } else {
+        await signInWithRedirect(auth, provider);
       }
-
-      const userData = {
-        _id: user.uid,
-        email: user.email,
-        ten: user.displayName || "",
-        sdt: "",
-        role: "user",
-        photoURL: user.photoURL,
-      };
-      localStorage.setItem("user", JSON.stringify(userData));
-
-      navigate("/homeuser");
     } catch (err) {
       console.error(err);
-      setError("Đăng nhập Google thất bại!");
-    } finally {
+      setError("Không thể khởi tạo đăng nhập Google!");
       setIsLoading(false);
     }
   };
 
-  // === Giao diện ===
+  // ✅ Chỉ xử lý redirect khi thực sự có login Google
+  useEffect(() => {
+    const handleRedirectResult = async () => {
+      try {
+        const result = await getRedirectResult(auth);
+        if (!result?.user) return; // không có login mới
+
+        const user = result.user;
+        const userRef = doc(db, "users", user.uid);
+        const snap = await getDoc(userRef);
+
+        if (!snap.exists()) {
+          await setDoc(userRef, {
+            email: user.email,
+            name: user.displayName || "",
+            photoURL: user.photoURL || "",
+            role: "user",
+            partnerId: "",
+            status: "approved",
+            createdAt: new Date(),
+          });
+        }
+
+        const userData = {
+          _id: user.uid,
+          email: user.email,
+          ten: user.displayName || "",
+          sdt: "",
+          role: "user",
+          partnerId: "",
+          photoURL: user.photoURL || "",
+        };
+
+        localStorage.setItem("user", JSON.stringify(userData));
+        socket.emit("registerUser", user.uid);
+        navigate("/homeuser");
+      } catch (err) {
+        console.error("Google Redirect Error:", err);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    handleRedirectResult();
+  }, [navigate]);
+
+  // 💅 Giao diện
   return (
     <div
       style={{
@@ -218,7 +320,6 @@ export default function Login() {
           </p>
         </div>
 
-        {/* Form đăng nhập */}
         <form onSubmit={handleSubmit}>
           <input
             value={email}

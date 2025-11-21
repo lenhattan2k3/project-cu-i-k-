@@ -2,24 +2,21 @@
   "compilerOptions": {
     "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node.tsbuildinfo",
     "target": "ES2023",
-    "lib": ["ES2023"],
+    "lib": ["DOM", "DOM.Iterable", "ES2023"],
     "module": "ESNext",
-    "types": ["node"], // ✅ Quan trọng để fix lỗi require()
+    "types": ["node", "react", "react-dom"],
     "skipLibCheck": true,
-"jsx": "react-jsx",
-    /* Bundler mode */
+    "jsx": "react-jsx",
     "moduleResolution": "bundler",
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
     "moduleDetection": "force",
     "noEmit": true,
-
-    /* Linting */
     "strict": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true
-  },
+  }
 }

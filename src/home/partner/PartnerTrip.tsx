@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import type { CSSProperties } from "react";
+import { uploadToCloudinary } from "../../api/uploadToCloudinary";
 import {
   FaPlus,
   FaEdit,
@@ -13,6 +14,8 @@ import {
   FaMoneyBill,
   FaClock,
   FaCalendarAlt,
+  FaIdCard,
+  FaCarSide,
 } from "react-icons/fa";
 import {
   getAllTrips,
@@ -20,10 +23,12 @@ import {
   updateTrip,
   deleteTrip,
 } from "../../api/tripApi";
+import { getAuth, onAuthStateChanged } from "firebase/auth"; // 🔥 Dùng Firebase Auth
 
 interface Trip {
   _id?: string;
   tenChuyen: string;
+  maTai: string;
   tu: string;
   den: string;
   ngayKhoiHanh?: string;
@@ -32,7 +37,11 @@ interface Trip {
   soLuongGhe: number;
   nhaXe: string;
   trangThai: string;
+  loaiXe: string;
+  hangXe: string;
+  mauSac: string;
   hinhAnh?: string;
+  partnerId?: string;
 }
 
 export default function PartnerTrip() {
@@ -41,20 +50,39 @@ export default function PartnerTrip() {
   const [showForm, setShowForm] = useState(false);
   const [formData, setFormData] = useState<Trip>({
     tenChuyen: "",
+    maTai: "",
     tu: "",
     den: "",
     giaVe: 0,
     soLuongGhe: 0,
-    nhaXe: "",
+    nhaXe: "Nhà xe đối tác",
     trangThai: "Hoạt động",
     ngayKhoiHanh: "",
     gioKhoiHanh: "",
+    loaiXe: "Giường nằm",
+    hangXe: "",
+    mauSac: "",
   });
   const [editingTrip, setEditingTrip] = useState<Trip | null>(null);
   const [selectedImage, setSelectedImage] = useState<File | null>(null);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [partnerId, setPartnerId] = useState<string>("");
 
-  // 📦 Lấy danh sách chuyến xe
+  // ✅ Lấy user hiện tại từ Firebase Auth
+  useEffect(() => {
+    const auth = getAuth();
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        setPartnerId(user.uid);
+      } else {
+        setPartnerId("");
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // 🚌 Lấy danh sách chuyến xe
   useEffect(() => {
     fetchTrips();
   }, []);
@@ -71,34 +99,36 @@ export default function PartnerTrip() {
     }
   };
 
-  // 🟢 Mở form thêm mới
   const handleOpenAddForm = () => {
     setEditingTrip(null);
     setFormData({
       tenChuyen: "",
+      maTai: "",
       tu: "",
       den: "",
       giaVe: 0,
       soLuongGhe: 0,
-      nhaXe: "",
+      nhaXe: "Nhà xe đối tác",
       trangThai: "Hoạt động",
       ngayKhoiHanh: "",
       gioKhoiHanh: "",
+      loaiXe: "Giường nằm",
+      hangXe: "",
+      mauSac: "",
     });
     setSelectedImage(null);
     setPreviewImage(null);
     setShowForm(true);
   };
 
-  // 🟡 Chỉnh sửa chuyến
   const handleEditTrip = (trip: Trip) => {
     setEditingTrip(trip);
     setFormData(trip);
-    setPreviewImage(trip.hinhAnh ? `http://localhost:5000${trip.hinhAnh}` : null);
+    setPreviewImage(trip.hinhAnh || null);
+    setSelectedImage(null);
     setShowForm(true);
   };
 
-  // 🖼️ Chọn ảnh
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -107,246 +137,175 @@ export default function PartnerTrip() {
     }
   };
 
-  // 💾 Lưu form
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      const data = new FormData();
-      Object.entries(formData).forEach(
-        ([key, value]) => value !== undefined && data.append(key, value as any)
-      );
-      if (selectedImage) data.append("hinhAnh", selectedImage);
+  const handleChange = (
+    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
+  ) => {
+    const { name, value } = e.target;
+    setFormData({ ...formData, [name]: value });
+  };
 
-      if (editingTrip?._id) await updateTrip(editingTrip._id, data, true);
-      else await createTrip(data, true);
+  // 🧾 Gửi form (Thêm / Cập nhật chuyến xe)
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!partnerId) {
+      alert("⚠️ Bạn cần đăng nhập để thêm hoặc sửa chuyến xe!");
+      return;
+    }
+
+    try {
+      setUploading(true);
+
+      let imageUrl: string | undefined = formData.hinhAnh;
+
+      // Nếu có chọn ảnh mới → upload Cloudinary
+      if (selectedImage) {
+        const uploadedUrl = await uploadToCloudinary(selectedImage);
+        if (uploadedUrl) {
+          imageUrl = uploadedUrl;
+        } else {
+          alert("❌ Upload ảnh thất bại!");
+          setUploading(false);
+          return;
+        }
+      }
+
+      // Dữ liệu chuyến xe
+      const tripData = {
+        ...formData,
+        nhaXe: partnerId, // 🔥 Gán ID của partner làm nhà xe
+        hinhAnh: imageUrl ?? formData.hinhAnh,
+        partnerId, // vẫn giữ partnerId để tham chiếu riêng
+      };
+      
+      if (editingTrip) {
+        const updatedTrip = await updateTrip(editingTrip._id!, tripData);
+        setTrips((prev) =>
+          prev.map((t) => (t._id === updatedTrip._id ? updatedTrip : t))
+        );
+        alert("✅ Cập nhật thành công!");
+      } else {
+        const newTrip = await createTrip(tripData);
+        setTrips((prev) => [newTrip, ...prev]);
+        alert("✅ Thêm chuyến xe thành công!");
+      }
 
       setShowForm(false);
-      fetchTrips();
     } catch (error) {
-      console.error("❌ Lỗi khi lưu:", error);
+      console.error("❌ Lỗi khi lưu chuyến xe:", error);
+      alert("❌ Lưu thất bại!");
+    } finally {
+      setUploading(false);
+      setSelectedImage(null);
     }
   };
 
-  // ❌ Xóa chuyến
   const handleDeleteTrip = async (id: string) => {
     if (window.confirm("Bạn có chắc muốn xóa chuyến xe này không?")) {
       try {
         await deleteTrip(id);
-        setTrips(trips.filter((t) => t._id !== id));
+        setTrips((prev) => prev.filter((t) => t._id !== id));
+        alert("🗑️ Xóa thành công!");
       } catch (error) {
         console.error("❌ Lỗi khi xóa:", error);
       }
     }
   };
 
-  /* === CSS === */
   const styles: { [key: string]: CSSProperties } = {
-    container: {
-      height: "100vh",
-      display: "flex",
-      flexDirection: "column",
-      background: "linear-gradient(135deg, #e0f0ff 0%, #f9f5ff 100%)",
-      fontFamily: "Arial, sans-serif",
-    },
-    header: {
-      position: "sticky",
-      top: 0,
-      background: "linear-gradient(135deg, #e0f0ff 0%, #f9f5ff 100%)",
-      zIndex: 10,
-      display: "flex",
-      justifyContent: "space-between",
-      alignItems: "center",
-      padding: "20px",
-      borderBottom: "1px solid #ddd",
-    },
-    title: { fontSize: "26px", fontWeight: 700, color: "#333" },
-    subtitle: { fontSize: "14px", color: "#666" },
-    button: {
-      background: "linear-gradient(90deg, #2563eb, #9333ea)",
-      color: "#fff",
-      padding: "10px 20px",
-      borderRadius: "12px",
-      border: "none",
-      cursor: "pointer",
-      display: "flex",
-      alignItems: "center",
-      gap: "6px",
-      fontWeight: 600,
-    },
-    scrollArea: { flex: 1, overflowY: "auto", padding: "20px" },
+    container: { height: "100vh", display: "flex", flexDirection: "column" },
+    header: { display: "flex", justifyContent: "space-between", padding: 20 },
+    title: { fontSize: 26, fontWeight: 700 },
+    scrollArea: { flex: 1, overflowY: "auto", padding: 20 },
     cardContainer: {
       display: "grid",
+      gap: 20,
       gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
-      gap: "20px",
     },
     card: {
       background: "#fff",
-      borderRadius: "16px",
+      borderRadius: 16,
       boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
-      overflow: "hidden",
-      display: "flex",
-      flexDirection: "column",
     },
     cardImage: {
       width: "100%",
-      height: "160px",
+      height: 160,
       objectFit: "cover",
       background: "#f0f0f0",
       display: "flex",
       alignItems: "center",
       justifyContent: "center",
     },
-    cardContent: { padding: "16px", flex: 1 },
-    cardTitle: {
-      fontSize: "18px",
-      fontWeight: 700,
-      marginBottom: "10px",
-      color: "#222",
-    },
+    cardContent: { padding: 16 },
+    cardTitle: { fontSize: 18, fontWeight: 700, marginBottom: 10 },
     infoRow: {
       display: "flex",
       alignItems: "center",
-      gap: "6px",
-      fontSize: "14px",
-      marginBottom: "6px",
-      color: "#555",
+      gap: 6,
+      fontSize: 14,
+      marginBottom: 6,
     },
     price: {
-      fontSize: "20px",
+      fontSize: 20,
       fontWeight: 700,
       color: "#2563eb",
-      marginTop: "10px",
+      marginTop: 10,
     },
-    actions: { display: "flex", gap: "10px", marginTop: "12px" },
+    actions: { display: "flex", gap: 10, marginTop: 12 },
     actionBtn: {
       flex: 1,
-      padding: "8px 0",
-      borderRadius: "10px",
+      padding: 8,
+      borderRadius: 10,
       fontWeight: 600,
       cursor: "pointer",
       display: "flex",
       alignItems: "center",
       justifyContent: "center",
-      gap: "6px",
+      gap: 6,
       border: "none",
     },
     editBtn: { background: "#e0f0ff", color: "#2563eb" },
     deleteBtn: { background: "#ffe0e0", color: "#d23f3f" },
-    modalOverlay: {
-      position: "fixed",
-      inset: 0,
-      backgroundColor: "rgba(0,0,0,0.5)",
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      zIndex: 999,
-    },
-    modal: {
-      background: "#fff",
-      borderRadius: "24px",
-      width: "100%",
-      maxWidth: "600px",
-      maxHeight: "90vh",
-      overflow: "hidden",
-      display: "flex",
-      flexDirection: "column",
-    },
-    modalHeader: {
-      background: "linear-gradient(90deg,#2563eb,#9333ea)",
-      padding: "16px",
-      borderTopLeftRadius: "24px",
-      borderTopRightRadius: "24px",
-      display: "flex",
-      justifyContent: "space-between",
-      alignItems: "center",
-      color: "#fff",
-      fontSize: "18px",
-      fontWeight: 600,
-    },
-    formContainer: {
-      padding: "16px",
-      overflowY: "auto",
-      flex: 1,
-      maxHeight: "70vh",
-    },
-    formGroup: {
-      marginBottom: "14px",
-      display: "flex",
-      flexDirection: "column",
-    },
-    input: {
-      padding: "10px",
-      borderRadius: "10px",
-      border: "1px solid #ccc",
-      fontSize: "14px",
-    },
-    select: {
-      padding: "10px",
-      borderRadius: "10px",
-      border: "1px solid #ccc",
-      fontSize: "14px",
-    },
-    imagePreview: {
-      marginTop: "10px",
-      width: "100%",
-      height: "160px",
-      objectFit: "cover",
-      borderRadius: "12px",
-    },
-    modalActions: { display: "flex", gap: "10px", marginTop: "16px" },
-    saveBtn: {
-      flex: 1,
-      background: "linear-gradient(90deg,#2563eb,#9333ea)",
-      color: "#fff",
-      padding: "10px",
-      borderRadius: "10px",
-      border: "none",
-      fontWeight: 600,
-      cursor: "pointer",
-    },
-    cancelBtn: {
-      flex: 1,
-      background: "#eee",
-      color: "#333",
-      padding: "10px",
-      borderRadius: "10px",
-      border: "none",
-      fontWeight: 600,
-      cursor: "pointer",
-    },
   };
 
   return (
     <div style={styles.container}>
-      {/* Header */}
       <div style={styles.header}>
-        <div>
-          <div style={styles.title}>
-            <FaBus style={{ marginRight: "8px" }} />
-            Quản lý chuyến xe
-          </div>
-          <div style={styles.subtitle}>
-            Theo dõi, thêm mới và chỉnh sửa thông tin các chuyến xe
-          </div>
+        <div style={styles.title}>
+          <FaBus /> Quản lý chuyến xe
         </div>
-        <button style={styles.button} onClick={handleOpenAddForm}>
+        <button
+          onClick={handleOpenAddForm}
+          style={{
+            background: "#2563eb",
+            color: "#fff",
+            padding: "8px 14px",
+            borderRadius: 8,
+            fontWeight: 600,
+            border: "none",
+            cursor: "pointer",
+          }}
+        >
           <FaPlus /> Thêm chuyến xe
         </button>
       </div>
 
-      {/* Danh sách chuyến xe */}
       <div style={styles.scrollArea}>
         {loading && <div>Đang tải dữ liệu...</div>}
-
         <div style={styles.cardContainer}>
           {trips.map((trip) => (
             <div key={trip._id} style={styles.card}>
               <div style={styles.cardImage}>
                 {trip.hinhAnh ? (
                   <img
-                    src={`http://localhost:5000${trip.hinhAnh}`}
+                    src={trip.hinhAnh}
                     alt={trip.tenChuyen}
-                    style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                    style={{
+                      width: "100%",
+                      height: "100%",
+                      objectFit: "cover",
+                      borderTopLeftRadius: 16,
+                      borderTopRightRadius: 16,
+                    }}
                   />
                 ) : (
                   <FaImage size={40} color="#aaa" />
@@ -356,6 +315,12 @@ export default function PartnerTrip() {
                 <div style={styles.cardTitle}>{trip.tenChuyen}</div>
                 <div style={styles.infoRow}>
                   <FaMapMarkerAlt /> {trip.tu} → {trip.den}
+                </div>
+                <div style={styles.infoRow}>
+                  <FaIdCard /> Mã tài: {trip.maTai || "—"}
+                </div>
+                <div style={styles.infoRow}>
+                  <FaCarSide /> {trip.loaiXe} ({trip.hangXe} - {trip.mauSac})
                 </div>
                 <div style={styles.infoRow}>
                   <FaBuilding /> {trip.nhaXe}
@@ -392,166 +357,296 @@ export default function PartnerTrip() {
         </div>
       </div>
 
-      {/* 🟣 Modal Form */}
       {showForm && (
-        <div style={styles.modalOverlay}>
-          <div style={styles.modal}>
-            <div style={styles.modalHeader}>
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            backgroundColor: "rgba(0,0,0,0.5)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 999,
+          }}
+        >
+          <div
+            style={{
+              background: "#fff",
+              borderRadius: 24,
+              width: "100%",
+              maxWidth: 600,
+              maxHeight: "90vh",
+              overflow: "hidden",
+              display: "flex",
+              flexDirection: "column",
+            }}
+          >
+            <div
+              style={{
+                background: "#2563eb",
+                padding: 16,
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                color: "#fff",
+                fontSize: 18,
+              }}
+            >
               {editingTrip ? "Cập nhật chuyến xe" : "Thêm chuyến xe mới"}
-              <FaTimes style={{ cursor: "pointer" }} onClick={() => setShowForm(false)} />
+              <FaTimes
+                style={{ cursor: "pointer" }}
+                onClick={() => setShowForm(false)}
+              />
             </div>
-            <form style={styles.formContainer} onSubmit={handleSubmit}>
-              <div style={styles.formGroup}>
-                <label>Tên chuyến</label>
-                <input
-                  style={styles.input}
-                  name="tenChuyen"
-                  value={formData.tenChuyen}
-                  onChange={(e) =>
-                    setFormData({ ...formData, tenChuyen: e.target.value })
-                  }
-                  required
+
+            <form
+              style={{
+                padding: 16,
+                overflowY: "auto",
+                flex: 1,
+                display: "flex",
+                flexDirection: "column",
+                gap: 12,
+              }}
+              onSubmit={handleSubmit}
+            >
+              <label>Tên chuyến</label>
+              <input
+                name="tenChuyen"
+                value={formData.tenChuyen}
+                onChange={handleChange}
+                placeholder="VD: Sài Gòn - Hà Nội"
+                required
+                style={{
+                  padding: 10,
+                  border: "1px solid #ddd",
+                  borderRadius: 8,
+                }}
+              />
+
+              <label>Mã tài</label>
+              <input
+                name="maTai"
+                value={formData.maTai}
+                onChange={handleChange}
+                placeholder="Nhập mã tài"
+                required
+                style={{
+                  padding: 10,
+                  border: "1px solid #ddd",
+                  borderRadius: 8,
+                }}
+              />
+
+              <label>Loại xe</label>
+              <select
+                name="loaiXe"
+                value={formData.loaiXe}
+                onChange={handleChange}
+                style={{
+                  padding: 10,
+                  border: "1px solid #ddd",
+                  borderRadius: 8,
+                }}
+              >
+                <option value="Giường nằm">Giường nằm</option>
+                <option value="Limousine giường nằm">
+                  Limousine giường nằm
+                </option>
+                <option value="VIP giường nằm">VIP giường nằm</option>
+              </select>
+
+              <label>Hãng xe</label>
+              <input
+                name="hangXe"
+                value={formData.hangXe}
+                onChange={handleChange}
+                placeholder="VD: Thaco, Hyundai..."
+                style={{
+                  padding: 10,
+                  border: "1px solid #ddd",
+                  borderRadius: 8,
+                }}
+              />
+
+              <label>Màu sắc</label>
+              <input
+                name="mauSac"
+                value={formData.mauSac}
+                onChange={handleChange}
+                placeholder="VD: Đỏ, trắng, đen..."
+                style={{
+                  padding: 10,
+                  border: "1px solid #ddd",
+                  borderRadius: 8,
+                }}
+              />
+
+              <label>Điểm đi</label>
+              <input
+                name="tu"
+                value={formData.tu}
+                onChange={handleChange}
+                placeholder="Nhập điểm đi"
+                required
+                style={{
+                  padding: 10,
+                  border: "1px solid #ddd",
+                  borderRadius: 8,
+                }}
+              />
+
+              <label>Điểm đến</label>
+              <input
+                name="den"
+                value={formData.den}
+                onChange={handleChange}
+                placeholder="Nhập điểm đến"
+                required
+                style={{
+                  padding: 10,
+                  border: "1px solid #ddd",
+                  borderRadius: 8,
+                }}
+              />
+
+              <div style={{ display: "flex", gap: 12 }}>
+                <div style={{ flex: 1 }}>
+                  <label>Ngày khởi hành</label>
+                  <input
+                    type="date"
+                    name="ngayKhoiHanh"
+                    value={formData.ngayKhoiHanh}
+                    onChange={handleChange}
+                    style={{
+                      width: "100%",
+                      padding: 10,
+                      border: "1px solid #ddd",
+                      borderRadius: 8,
+                    }}
+                  />
+                </div>
+
+                <div style={{ flex: 1 }}>
+                  <label>Giờ khởi hành</label>
+                  <input
+                    type="time"
+                    name="gioKhoiHanh"
+                    value={formData.gioKhoiHanh}
+                    onChange={handleChange}
+                    style={{
+                      width: "100%",
+                      padding: 10,
+                      border: "1px solid #ddd",
+                      borderRadius: 8,
+                    }}
+                  />
+                </div>
+              </div>
+
+              <div style={{ display: "flex", gap: 12 }}>
+                <div style={{ flex: 1 }}>
+                  <label>Giá vé (VNĐ)</label>
+                  <input
+                    type="number"
+                    name="giaVe"
+                    value={formData.giaVe}
+                    onChange={(e) =>
+                      setFormData({ ...formData, giaVe: Number(e.target.value) })
+                    }
+                    required
+                    style={{  
+                      width: "100%",
+                      padding: 10,
+                      border: "1px solid #ddd",
+                      borderRadius: 8,
+                    }}
+                  />
+                </div>
+
+                <div style={{ flex: 1 }}>
+                  <label>Số lượng ghế</label>
+                  <input
+                    type="number"
+                    name="soLuongGhe"
+                    value={formData.soLuongGhe}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        soLuongGhe: Number(e.target.value),
+                      })
+                    }
+                    required
+                    style={{
+                      width: "100%",
+                      padding: 10,
+                      border: "1px solid #ddd",
+                      borderRadius: 8,
+                    }}
+                  />
+                </div>
+              </div>
+
+              <label>Trạng thái</label>
+              <select
+                name="trangThai"
+                value={formData.trangThai}
+                onChange={handleChange}
+                style={{
+                  padding: 10,
+                  border: "1px solid #ddd",
+                  borderRadius: 8,
+                }}
+              >
+                <option value="Hoạt động">Hoạt động</option>
+                <option value="Tạm dừng">Tạm dừng</option>
+              </select>
+
+              <label>Ảnh chuyến xe</label>
+              <input
+                type="file"
+                accept="image/*"
+                onChange={handleImageChange}
+                style={{
+                  padding: 8,
+                  border: "1px solid #ddd",
+                  borderRadius: 8,
+                }}
+              />
+
+              {previewImage && (
+                <img
+                  src={previewImage}
+                  alt="Preview"
+                  style={{
+                    width: "100%",
+                    height: 160,
+                    objectFit: "cover",
+                    borderRadius: 8,
+                  }}
                 />
-              </div>
+              )}
 
-              <div style={styles.formGroup}>
-                <label>Điểm đi</label>
-                <input
-                  style={styles.input}
-                  name="tu"
-                  value={formData.tu}
-                  onChange={(e) =>
-                    setFormData({ ...formData, tu: e.target.value })
-                  }
-                  required
-                />
-              </div>
-
-              <div style={styles.formGroup}>
-                <label>Điểm đến</label>
-                <input
-                  style={styles.input}
-                  name="den"
-                  value={formData.den}
-                  onChange={(e) =>
-                    setFormData({ ...formData, den: e.target.value })
-                  }
-                  required
-                />
-              </div>
-
-              {/* 🕓 Thêm ngày khởi hành */}
-              <div style={styles.formGroup}>
-                <label>Ngày khởi hành</label>
-                <input
-                  type="date"
-                  style={styles.input}
-                  name="ngayKhoiHanh"
-                  value={formData.ngayKhoiHanh || ""}
-                  onChange={(e) =>
-                    setFormData({ ...formData, ngayKhoiHanh: e.target.value })
-                  }
-                  required
-                />
-              </div>
-
-              {/* ⏰ Thêm giờ khởi hành */}
-              <div style={styles.formGroup}>
-                <label>Giờ khởi hành</label>
-                <input
-                  type="time"
-                  style={styles.input}
-                  name="gioKhoiHanh"
-                  value={formData.gioKhoiHanh || ""}
-                  onChange={(e) =>
-                    setFormData({ ...formData, gioKhoiHanh: e.target.value })
-                  }
-                  required
-                />
-              </div>
-
-              <div style={styles.formGroup}>
-                <label>Giá vé</label>
-                <input
-                  type="number"
-                  style={styles.input}
-                  name="giaVe"
-                  value={formData.giaVe}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      giaVe: Number(e.target.value),
-                    })
-                  }
-                  required
-                />
-              </div>
-
-              <div style={styles.formGroup}>
-                <label>Số lượng ghế</label>
-                <input
-                  type="number"
-                  style={styles.input}
-                  name="soLuongGhe"
-                  value={formData.soLuongGhe}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      soLuongGhe: Number(e.target.value),
-                    })
-                  }
-                  required
-                />
-              </div>
-
-              <div style={styles.formGroup}>
-                <label>Nhà xe</label>
-                <input
-                  style={styles.input}
-                  name="nhaXe"
-                  value={formData.nhaXe}
-                  onChange={(e) =>
-                    setFormData({ ...formData, nhaXe: e.target.value })
-                  }
-                  required
-                />
-              </div>
-
-              <div style={styles.formGroup}>
-                <label>Trạng thái</label>
-                <select
-                  style={styles.select}
-                  name="trangThai"
-                  value={formData.trangThai}
-                  onChange={(e) =>
-                    setFormData({ ...formData, trangThai: e.target.value })
-                  }
-                >
-                  <option>Hoạt động</option>
-                  <option>Tạm dừng</option>
-                </select>
-              </div>
-
-              <div style={styles.formGroup}>
-                <label>Ảnh chuyến xe</label>
-                <input type="file" accept="image/*" onChange={handleImageChange} />
-                {previewImage && (
-                  <img src={previewImage} alt="Preview" style={styles.imagePreview} />
-                )}
-              </div>
-
-              <div style={styles.modalActions}>
-                <button type="submit" style={styles.saveBtn}>
-                  {editingTrip ? "Cập nhật" : "Thêm mới"}
-                </button>
-                <button
-                  type="button"
-                  style={styles.cancelBtn}
-                  onClick={() => setShowForm(false)}
-                >
-                  Hủy
-                </button>
-              </div>
+              <button
+                type="submit"
+                disabled={uploading}
+                style={{
+                  background: "#2563eb",
+                  color: "#fff",
+                  padding: "10px 0",
+                  border: "none",
+                  borderRadius: 10,
+                  marginTop: 10,
+                  fontSize: 16,
+                  fontWeight: 600,
+                }}
+              >
+                {uploading
+                  ? "Đang lưu..."
+                  : editingTrip
+                  ? "Cập nhật chuyến xe"
+                  : "Thêm chuyến xe"}
+              </button>
             </form>
           </div>
         </div>

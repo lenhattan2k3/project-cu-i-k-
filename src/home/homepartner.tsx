@@ -115,17 +115,14 @@ export default function HomePartner() {
   };
 
   return (
-    <div
-      style={{
-        display: "flex",
-        minHeight: "100vh",
-        fontFamily: "Arial, sans-serif",
-        backgroundColor: "#f4f6f8",
-      }}
-    >
-      {/* 🌙 SIDEBAR */}
+    <div style={{ display: "flex", fontFamily: "Arial, sans-serif" }}>
+      {/* 🌙 SIDEBAR CỐ ĐỊNH */}
       <div
         style={{
+          position: "fixed",
+          top: 0,
+          left: 0,
+          height: "100vh",
           width: "260px",
           background: "#1976d2",
           color: "white",
@@ -133,6 +130,7 @@ export default function HomePartner() {
           flexDirection: "column",
           padding: "24px 16px",
           boxShadow: "4px 0 20px rgba(0,0,0,0.1)",
+          zIndex: 1000,
         }}
       >
         <h2
@@ -199,7 +197,17 @@ export default function HomePartner() {
       </div>
 
       {/* 🌤️ MAIN CONTENT */}
-      <div style={{ flex: 1, padding: "40px" }}>{renderContent()}</div>
+      <div
+        style={{
+          flex: 1,
+          marginLeft: "260px", // để tránh bị đè bởi sidebar
+          padding: "40px",
+          backgroundColor: "#f4f6f8",
+          minHeight: "100vh",
+        }}
+      >
+        {renderContent()}
+      </div>
     </div>
   );
 }

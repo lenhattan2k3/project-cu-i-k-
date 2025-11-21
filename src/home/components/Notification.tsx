@@ -1,130 +1,245 @@
-import { useState } from 'react';
-import { FaBell, FaCheckCircle, FaExclamationTriangle, FaInfoCircle, FaEnvelopeOpen } from 'react-icons/fa';
+import { useEffect, useState } from "react";
+import { socket } from "../../utils/socket";
+import { getNotificationsByRole } from "../../api/notificationsApi";
 
-interface NotificationItem {
-  id: string;
+interface Notification {
+  _id: string;
   title: string;
-  message: string;
-  type: 'info' | 'success' | 'warning';
-  date: string;
-  isRead: boolean;
+  content: string;
+  sender: string;
+  receivers: string[];
+  image?: string; // 🖼️ Thêm trường ảnh
+  createdAt: string;
 }
 
-export default function Notification() {
-  const [notifications, setNotifications] = useState<NotificationItem[]>([
-    {
-      id: '1',
-      title: 'Khuyến mãi mới',
-      message: 'Giảm 20% cho tất cả các chuyến xe trong tháng này! Đừng bỏ lỡ cơ hội đặt vé giá tốt.',
-      type: 'success',
-      date: '2025-10-22',
-      isRead: false
-    },
-    {
-      id: '2',
-      title: 'Cập nhật lịch trình',
-      message: 'Chuyến xe Hà Nội - Sapa có thay đổi giờ khởi hành từ 6:30 thành 7:00. Vui lòng kiểm tra lại chi tiết vé.',
-      type: 'warning',
-      date: '2025-10-21',
-      isRead: true
-    },
-    {
-      id: '3',
-      title: 'Thông báo bảo trì',
-      message: 'Hệ thống sẽ bảo trì nâng cấp vào ngày 25/10/2025 từ 23:00 - 24:00 để cải thiện hiệu suất.',
-      type: 'info',
-      date: '2025-10-20',
-      isRead: true
-    }
-  ]);
+export default function UserNotifications() {
+  const [notifications, setNotifications] = useState<Notification[]>([]);
 
-  const markAsRead = (id: string) => {
-    setNotifications(notifications.map(notif => 
-      notif.id === id ? { ...notif, isRead: true } : notif
-    ));
-  };
+  useEffect(() => {
+    const fetchNotifications = async () => {
+      try {
+        const data = await getNotificationsByRole("user");
+        setNotifications(data.reverse()); // Hiển thị mới nhất trước
+      } catch (error) {
+        console.error("Lỗi lấy thông báo:", error);
+      }
+    };
+    fetchNotifications();
 
-  const getTypeIcon = (type: string) => {
-    switch (type) {
-      case 'success': return <FaCheckCircle className="text-green-500 text-xl" />;
-      case 'warning': return <FaExclamationTriangle className="text-yellow-500 text-xl" />;
-      default: return <FaInfoCircle className="text-blue-500 text-xl" />;
-    }
-  };
+    // 🟢 Nhận thông báo realtime từ socket
+    socket.on("receive_notification", (data: Notification) => {
+      console.log("📩 New notification for user:", data);
+      // Kiểm tra nếu thông báo dành cho user
+      if (
+        data.receivers &&
+        (data.receivers.includes("user") || data.receivers.includes("all"))
+      ) {
+        setNotifications((prev) => [data, ...prev]);
+      }
+    });
 
-  const getTypeStyles = (type: string) => {
-    switch (type) {
-      case 'success': return 'border-green-300';
-      case 'warning': return 'border-yellow-300';
-      default: return 'border-blue-300';
-    }
-  };
+    return () => {
+      socket.off("receive_notification");
+    };
+  }, []);
 
   return (
-    <div className="max-w-4xl mx-auto">
-      <h2 className="text-3xl font-extrabold text-blue-600 mb-8 flex items-center gap-3">
-        <FaBell className="text-blue-500" /> Trung tâm Thông báo
+    <div
+      style={{
+        padding: "24px",
+        
+        minHeight: "100vh",
+        fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+      }}
+    >
+      <h2
+        style={{
+          color: "#1e40af",
+          marginBottom: "24px",
+          fontSize: "28px",
+          fontWeight: "700",
+          letterSpacing: "-0.5px",
+          display: "flex",
+          alignItems: "center",
+          gap: "8px",
+        }}
+      >
+        <span style={{ fontSize: "32px" }}>🔔</span> Thông báo
       </h2>
 
-      <div className="space-y-4">
-        {notifications.map((notif) => (
-          <div 
-            key={notif.id}
-            // Thêm shadow và nền trắng cho thông báo chưa đọc để nổi bật
-            className={`flex items-start p-5 rounded-xl border-l-4 transition duration-300 
-                        ${getTypeStyles(notif.type)} 
-                        ${!notif.isRead 
-                            ? 'bg-white shadow-lg border-opacity-100 hover:shadow-xl' 
-                            : 'bg-gray-50 border-opacity-50 text-gray-500'
-                        }`}
+      {notifications.length === 0 ? (
+        <div
+          style={{
+            background: "#ffffff",
+            borderRadius: "16px",
+            padding: "60px 20px",
+            textAlign: "center",
+            border: "1px solid #e0e7ff",
+            boxShadow: "0 4px 20px rgba(30, 64, 175, 0.08)",
+          }}
+        >
+          <p
+            style={{
+              color: "#94a3b8",
+              fontSize: "15px",
+              fontWeight: "500",
+            }}
           >
-            {/* Icon phân loại */}
-            <div className={`flex-shrink-0 mr-4 ${!notif.isRead ? 'opacity-100' : 'opacity-70'}`}>
-              {getTypeIcon(notif.type)}
-            </div>
-
-            {/* Nội dung thông báo */}
-            <div className="flex-grow">
-              <div className="flex justify-between items-start">
-                {/* Tiêu đề */}
-                <h3 
-                  className={`font-semibold text-lg ${!notif.isRead ? 'text-gray-800' : 'text-gray-600'}`}
+            Chưa có thông báo nào
+          </p>
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+          {notifications.map((n) => (
+            <div
+              key={n._id}
+              style={{
+                background: "linear-gradient(to right, #ffffff 0%, #f8fafc 100%)",
+                borderRadius: "16px",
+                padding: "20px",
+                border: "1.5px solid #e0e7ff",
+                boxShadow: "0 2px 8px rgba(30, 64, 175, 0.06)",
+                transition: "all 0.3s ease",
+                position: "relative",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.borderColor = "#bfdbfe";
+                e.currentTarget.style.boxShadow = "0 8px 24px rgba(30, 64, 175, 0.12)";
+                e.currentTarget.style.transform = "translateY(-2px)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.borderColor = "#e0e7ff";
+                e.currentTarget.style.boxShadow = "0 2px 8px rgba(30, 64, 175, 0.06)";
+                e.currentTarget.style.transform = "translateY(0)";
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "flex-start",
+                  gap: "12px",
+                  marginBottom: "12px",
+                }}
+              >
+                <div
+                  style={{
+                    width: "40px",
+                    height: "40px",
+                    borderRadius: "12px",
+                    background: "linear-gradient(135deg, #2563eb 0%, #1e40af 100%)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    flexShrink: 0,
+                    boxShadow: "0 4px 12px rgba(37, 99, 235, 0.3)",
+                  }}
                 >
-                  {notif.title}
-                  {!notif.isRead && (
-                    <span className="ml-3 inline-block w-2 h-2 rounded-full bg-blue-600 animate-pulse" title="Chưa đọc"></span>
-                  )}
-                </h3>
-                
-                {/* Ngày và trạng thái */}
-                <span className={`text-sm ${!notif.isRead ? 'text-gray-500' : 'text-gray-400'} flex items-center`}>
-                    {new Date(notif.date).toLocaleDateString()}
-                </span>
+                  <span style={{ fontSize: "20px" }}>📢</span>
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <strong
+                    style={{
+                      color: "#1e3a8a",
+                      fontSize: "16px",
+                      fontWeight: "600",
+                      display: "block",
+                      marginBottom: "6px",
+                      lineHeight: "1.4",
+                    }}
+                  >
+                    {n.title}
+                  </strong>
+                  <p
+                    style={{
+                      color: "#475569",
+                      fontSize: "14px",
+                      lineHeight: "1.6",
+                      marginBottom: "12px",
+                    }}
+                  >
+                    {n.content}
+                  </p>
+                </div>
               </div>
 
-              {/* Chi tiết thông báo */}
-              <p className={`mt-1 ${!notif.isRead ? 'text-gray-700' : 'text-gray-500'}`}>{notif.message}</p>
-
-              {/* Nút Đánh dấu đã đọc */}
-              {!notif.isRead && (
-                <button
-                  onClick={() => markAsRead(notif.id)}
-                  className="mt-3 text-sm font-medium text-blue-600 hover:text-blue-700 flex items-center gap-1 transition"
+              {/* 🖼️ Hiển thị ảnh nếu có */}
+              {n.image && (
+                <div
+                  style={{
+                    marginTop: "12px",
+                    marginBottom: "12px",
+                    borderRadius: "12px",
+                    overflow: "hidden",
+                    border: "1.5px solid #e0e7ff",
+                    display: "inline-block",
+                    maxWidth: "100%",
+                  }}
                 >
-                  <FaEnvelopeOpen />
-                  <span>Đánh dấu đã đọc</span>
-                </button>
+                  <img
+                    src={n.image}
+                    alt="Ảnh thông báo"
+                    style={{
+                      maxWidth: "300px",
+                      width: "auto",
+                      height: "auto",
+                      display: "block",
+                      maxHeight: "250px",
+                      objectFit: "cover",
+                    }}
+                  />
+                </div>
               )}
-            </div>
-          </div>
-        ))}
-      </div>
 
-      {notifications.length === 0 && (
-        <div className="text-center py-12 border border-dashed border-blue-300 rounded-lg bg-white mt-6">
-          <FaBell className="text-4xl text-blue-400 mx-auto mb-4" />
-          <p className="text-lg text-gray-600 font-medium">Tuyệt vời! Bạn không có thông báo mới nào.</p>
-          <p className="text-sm text-gray-400 mt-2">Mọi thứ đều được cập nhật.</p>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  marginTop: "12px",
+                  paddingTop: "12px",
+                  borderTop: "1px solid #e0e7ff",
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: "12px",
+                    color: "#64748b",
+                    fontWeight: "500",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "4px",
+                  }}
+                >
+                  <span style={{ fontSize: "14px" }}>👤</span>
+                  {n.sender}
+                </span>
+                <span
+                  style={{
+                    fontSize: "12px",
+                    color: "#94a3b8",
+                    fontWeight: "400",
+                  }}
+                >
+                  •
+                </span>
+                <span
+                  style={{
+                    fontSize: "12px",
+                    color: "#94a3b8",
+                    fontWeight: "500",
+                  }}
+                >
+                  {new Date(n.createdAt).toLocaleString("vi-VN", {
+                    year: "numeric",
+                    month: "2-digit",
+                    day: "2-digit",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
+                </span>
+              </div>
+            </div>
+          ))}
         </div>
       )}
     </div>

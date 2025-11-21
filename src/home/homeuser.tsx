@@ -16,55 +16,38 @@ export default function HomeUser() {
   const [sideImages, setSideImages] = useState({ left: "", right: "" });
 
   useEffect(() => {
-    // Thay ảnh nền và ảnh 2 bên tùy theo tab đang chọn - Tập trung vào xe khách
-    const images: Record<string, { bg: string; left: string; right: string }> = {
-      search: {
-        bg: "https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?auto=format&fit=crop&w=1500&q=80",
-        left: "https://images.unsplash.com/photo-1570125909232-eb263c188f7e?auto=format&fit=crop&w=800&q=80",
-        right: "https://images.unsplash.com/photo-1558618666-fcd25c85cd64?auto=format&fit=crop&w=800&q=80"
-      },
-      booking: {
-        bg: "https://images.unsplash.com/photo-1529070538774-1843cb3265df?auto=format&fit=crop&w=1500&q=80",
-        left: "https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?auto=format&fit=crop&w=800&q=80",
-        right: "https://images.unsplash.com/photo-1570125909232-eb263c188f7e?auto=format&fit=crop&w=800&q=80"
-      },
-      cart: {
-        bg: "https://images.unsplash.com/photo-1558618666-fcd25c85cd64?auto=format&fit=crop&w=1500&q=80",
-        left: "https://images.unsplash.com/photo-1529070538774-1843cb3265df?auto=format&fit=crop&w=800&q=80",
-        right: "https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?auto=format&fit=crop&w=800&q=80"
-      },
-      payment: {
-        bg: "https://images.unsplash.com/photo-1570125909232-eb263c188f7e?auto=format&fit=crop&w=1500&q=80",
-        left: "https://images.unsplash.com/photo-1558618666-fcd25c85cd64?auto=format&fit=crop&w=800&q=80",
-        right: "https://images.unsplash.com/photo-1529070538774-1843cb3265df?auto=format&fit=crop&w=800&q=80"
-      },
-      promotion: {
-        bg: "https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?auto=format&fit=crop&w=1500&q=80",
-        left: "https://images.unsplash.com/photo-1570125909232-eb263c188f7e?auto=format&fit=crop&w=800&q=80",
-        right: "https://images.unsplash.com/photo-1558618666-fcd25c85cd64?auto=format&fit=crop&w=800&q=80"
-      },
-      review: {
-        bg: "https://images.unsplash.com/photo-1529070538774-1843cb3265df?auto=format&fit=crop&w=1500&q=80",
-        left: "https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?auto=format&fit=crop&w=800&q=80",
-        right: "https://images.unsplash.com/photo-1570125909232-eb263c188f7e?auto=format&fit=crop&w=800&q=80"
-      },
-      notification: {
-        bg: "https://images.unsplash.com/photo-1558618666-fcd25c85cd64?auto=format&fit=crop&w=1500&q=80",
-        left: "https://images.unsplash.com/photo-1529070538774-1843cb3265df?auto=format&fit=crop&w=800&q=80",
-        right: "https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?auto=format&fit=crop&w=800&q=80"
-      },
-      profile: {
-        bg: "https://images.unsplash.com/photo-1570125909232-eb263c188f7e?auto=format&fit=crop&w=1500&q=80",
-        left: "https://images.unsplash.com/photo-1558618666-fcd25c85cd64?auto=format&fit=crop&w=800&q=80",
-        right: "https://images.unsplash.com/photo-1529070538774-1843cb3265df?auto=format&fit=crop&w=800&q=80"
-      },
-    };
+   // Chỉ giữ lại ảnh nền theo từng tab
+const images: Record<string, { bg: string }> = {
+  search: {
+    bg: "https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?auto=format&fit=crop&w=1500&q=80"
+  },
+  booking: {
+    bg: "https://images.unsplash.com/photo-1529070538774-1843cb3265df?auto=format&fit=crop&w=1500&q=80"
+  },
+  cart: {
+    bg: "https://images.unsplash.com/photo-1558618666-fcd25c85cd64?auto=format&fit=crop&w=1500&q=80"
+  },
+  payment: {
+    bg: "https://images.unsplash.com/photo-1570125909232-eb263c188f7e?auto=format&fit=crop&w=1500&q=80"
+  },
+  promotion: {
+    bg: "https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?auto=format&fit=crop&w=1500&q=80"
+  },
+  review: {
+    bg: "https://images.unsplash.com/photo-1529070538774-1843cb3265df?auto=format&fit=crop&w=1500&q=80"
+  },
+  notification: {
+    bg: "https://images.unsplash.com/photo-1558618666-fcd25c85cd64?auto=format&fit=crop&w=1500&q=80"
+  },
+  profile: {
+    bg: "https://images.unsplash.com/photo-1570125909232-eb263c188f7e?auto=format&fit=crop&w=1500&q=80"
+  }
+};
+
     
     const currentImages = images[activeTab];
-    setBgImage(currentImages.bg);
-    setSideImages({ left: currentImages.left, right: currentImages.right });
+setBgImage(currentImages.bg);
   }, [activeTab]);
-
   const renderComponent = () => {
     switch (activeTab) {
       case "search": return <SearchTrip />;
@@ -335,38 +318,27 @@ export default function HomeUser() {
           box-shadow: 0 8px 25px rgba(30, 64, 175, 0.5);
           background: linear-gradient(45deg, #f0f9ff, #ffffff);
         }
+main {
+  flex: 1;
+  background: transparent !important;
+  backdrop-filter: none !important;
+  
+  border-radius: 0 !important;
+  padding: 50px;
+  width: 100% !important;
+  max-width: 3000px;
+  box-shadow: none !important;
+  position: relative;
+  z-index: 2;
+  animation: slideInUp 0.8s ease-out;
+  border: none !important;
+}
 
-        main {
-          flex: 1;
-          background: rgba(255,255,255,0.95);
-          backdrop-filter: blur(25px);
-          margin: 30px auto;
-          border-radius: 30px;
-          padding: 50px;
-          width: 90%;
-          max-width: 1200px;
-          box-shadow: 
-            0 25px 50px rgba(0,0,0,0.15),
-            0 0 0 1px rgba(255,255,255,0.2),
-            inset 0 1px 0 rgba(255,255,255,0.3);
-          position: relative;
-          z-index: 2;
-          animation: slideInUp 0.8s ease-out;
-          border: 1px solid rgba(255,255,255,0.3);
-        }
 
-        main::before {
-          content: "";
-          position: absolute;
-          top: -2px;
-          left: -2px;
-          right: -2px;
-          bottom: -2px;
-          background: linear-gradient(45deg, #667eea, #764ba2, #f093fb, #f5576c);
-          border-radius: 32px;
-          z-index: -1;
-          opacity: 0.1;
-        }
+  main::before {
+  opacity: 0 !important;
+}
+
 
         @keyframes slideInUp {
           from { 
@@ -379,27 +351,120 @@ export default function HomeUser() {
           }
         }
 
-        footer {
-          color: rgba(255,255,255,0.9);
-          text-align: center;
-          padding: 30px;
-          font-size: 1rem;
-          background: linear-gradient(135deg, rgba(0,0,0,0.3), rgba(0,0,0,0.1));
-          backdrop-filter: blur(25px);
-          border-top: 1px solid rgba(255,255,255,0.1);
-          margin-top: auto;
-          position: relative;
-        }
+        /* --- Nội dung file Footer.css --- */
 
-        footer::before {
-          content: "";
-          position: absolute;
-          top: 0;
-          left: 0;
-          right: 0;
-          height: 1px;
-          background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent);
-        }
+.footer-wrapper {
+  background-color:rgba(2, 1, 11, 1); /* Màu nền xám nhạt */
+  padding-top: 40px;
+  color: #FFFFFF;
+  border-top: 1px solid #eee;
+}
+
+.footer-container {
+  max-width: 1500px;
+  margin: 0 auto; /* Căn giữa */
+  padding: 0 20px;
+}
+
+/* Đây là phần quan trọng nhất - Chia cột */
+.footer-main-content {
+  display: flex;
+  flex-wrap: wrap; /* Cho phép xuống hàng trên điện thoại */
+  justify-content: space-between;
+  gap: 30px; /* Khoảng cách giữa các cột */
+  border-bottom: 1px solid #ddd;
+  padding-bottom: 30px;
+}
+
+.footer-section {
+  flex: 1; /* Các cột tự động chia đều */
+  min-width: 200px; /* Độ rộng tối thiểu cho mỗi cột */
+}
+
+.footer-section h4 {
+  margin-bottom: 15px;
+  color: #FFFFF;
+}
+
+.footer-section p {
+  margin: 5px 0;
+  line-height: 1.6;
+}
+
+/* Định dạng cho danh sách liên kết */
+.footer-section ul {
+  list-style: none;
+  padding: 0;
+}
+
+.footer-section ul li {
+  margin-bottom: 10px;
+}
+
+.footer-section ul li a {
+  text-decoration: none;
+  color:rgb(228, 226, 240); /* Màu link */
+  transition: color 0.2s;
+}
+
+.footer-section ul li a:hover {
+  color:rgb(200, 14, 14); /* Màu link khi rê chuột */
+  text-decoration: underline;
+}
+
+/* Các icon thanh toán */
+.payment-icons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.payment-icons img {
+  height: 30px;
+  border: 1px solid #eee;
+  border-radius: 4px;
+}
+
+/* Các link tải app */
+.app-links {
+  display: flex;
+  flex-direction: column; /* Xếp dọc */
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.app-links img {
+  height: 40px;
+  width: auto;
+}
+
+/* Các link mạng xã hội */
+.social-links {
+  display: flex;
+  gap: 15px;
+}
+
+.social-links a {
+  text-decoration: none;
+  color: #007bff;
+  font-weight: 500;
+}
+
+/* Phần bản quyền (dưới cùng) */
+.footer-bottom {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap; /* Xuống hàng nếu không đủ chỗ */
+  padding: 20px 0;
+  gap: 15px;
+  font-size: 14px;
+}
+
+.bct-logo img {
+  height: 50px;
+}
+
 
         /* Floating particles */
         .particle {
@@ -431,7 +496,7 @@ export default function HomeUser() {
           width: 100%;
           height: 100%;
           background: 
-            radial-gradient(circle at 20% 30%, rgba(30, 64, 175,0.2), transparent 60%),
+            radial-gradient(circle at 20% 30%, rgba(200, 202, 209, 0.2), transparent 60%),
             radial-gradient(circle at 80% 70%, rgba(59, 130, 246,0.2), transparent 60%),
             radial-gradient(circle at 50% 50%, rgba(96, 165, 250,0.15), transparent 70%);
           filter: blur(100px);
@@ -805,11 +870,7 @@ header::after {
         <div className="background-layer" style={{ backgroundImage: `url(${bgImage})` }}></div>
       </div>
 
-      {/* Ảnh 2 bên */}
-      <div className="side-images-container">
-        <div className="side-image left" style={{ backgroundImage: `url(${sideImages.left})` }}></div>
-        <div className="side-image right" style={{ backgroundImage: `url(${sideImages.right})` }}></div>
-      </div>
+      
 
       {/* Floating buses */}
       <div className="floating-bus"></div>
@@ -854,9 +915,97 @@ header::after {
       <main>{renderComponent()}</main>
 
       {/* Footer */}
-      <footer>
-        © 2025 Vé Xe Online — Trải nghiệm đặt vé dễ dàng & nhanh chóng
+      <div className="footer-wrapper">
+      <footer className="footer-container">
+        
+        {/* Phần nội dung chính của footer (chia cột) */}
+        <div className="footer-main-content">
+
+          {/* Cột 1: Thông tin chung & Logo */}
+          <div className="footer-section">
+          <img 
+  src="https://i.fbcd.co/products/resized/resized-750-500/ex-xe-unique-logo-designs-2-cbd6a550a2914ecce39886496ac239ae46c1fa8b2de4f4372f4a20cfd7121789.jpg" 
+  alt="Logo Vé Xe Online" 
+  style={{
+    width: '100px',       // 👈 kích thước ngang
+    height: 'auto',       // tự điều chỉnh theo tỉ lệ
+    marginBottom: '15px',
+    borderRadius: '8px',  // bo góc nhẹ (nếu muốn)
+  }} 
+/>
+
+            <p><strong>Công ty TNHH Vé Xe Online Việt Nam</strong></p>
+            <p>Địa chỉ: 123 Đường ABC, Phường X, Quận Y, TP. Hồ Chí Minh</p>
+            <p>Hotline: <strong>1900 0000</strong></p>
+            <p>Email: hotro@vexeonline.vn</p>
+          </div>
+
+          {/* Cột 2: Liên kết hữu ích */}
+          <div className="footer-section">
+            <h4>Về chúng tôi</h4>
+            <ul>
+              <li><a href="/about">Giới thiệu</a></li>
+              <li><a href="/faq">Câu hỏi thường gặp</a></li>
+              <li><a href="/terms">Điều khoản sử dụng</a></li>
+              <li><a href="/policy">Chính sách bảo mật</a></li>
+            </ul>
+          </div>
+
+          {/* Cột 3: Thanh toán */}
+          <div className="footer-section">
+            <h4>Phương thức thanh toán</h4>
+            <div className="payment-icons">
+              {/* Thay bằng URL/src hình ảnh thật */}
+              <img src="data:image/webp;base64,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" alt="Visa" />
+              <img src="data:image/webp;base64,UklGRogFAABXRUJQVlA4IHwFAACwLgCdASopASkBPp1OpE0lpCOiItKYSLATiWdu4XPxEa7XrNGzVB8Nym2/0YR73zX5GfUx4qvSS8xf7O+sB6a/8P6kH9V6m30Jelj/cv9wPZj1UL0BvO149xTsBlmcDNN5PNd9F9CGgBt2QVS6qfFCzbsgql1U+KFm3ZBVLqp8ULNuyCqXVT4oWbdkFUuqnxQs27IKpdVPihZt2QVMgCthjziZA8bFr7n4vJT+GQXYTEMaZw40CEMpqp6bEtlC7ctLoVZrzHm3/xkSlNfpOgJ5lNUnB2u1+ExzxD7iQrvmBUBvc5yPwoWbG6S6vTZKJp4BuC1Yi/GdAtwoWbHYK6/wF0h7FOFdPwSemyD1NKn6jD94gNu3NL+e5BsKHUr+eoedPYUj2o9b7iVObp7UuJc2Y5YbzilQQCvY1Jba34tYyOGeC+Hd3Dj6apdVPiiRlO6g27IKpdVPihZt2QVS6qfFCzbsgql1U+KFm3ZBVLqp8ULNuyCqXVT4oWbdkFS4AP7/JzAAAAAAACp66xGgRXeEvrU4MehGfjsLzW3ilREFEep7D946YKI2T2KbcvqS990vtgXC7Dp9jTo6j80Zd5xltLkvYlhzgGZD28hc98qglDq2hGM/lfvxHTmSM9+KYlkmJl4DTGuJrLsIj4t9Btj1PYxZhl0Vn3ehIDPi5leW9psxPNqly8rq1KWI0gRbGiK4MrxbuJV6LU9AhzSuWjXRuaStehKW2Ox899XsP9T7vYggpKsxGmLg37SD7ixB8iTqDixxFCr/CaV6iCAormV3Y84Yv+1lFRprp970U4eQlxnbt3jx0158/csTZzSQL22ZtwuxDtjPOdefZBIFU+nUgUo7epzX3Vacq7F77qJGTuQzFlTNU8EFb5uIyfzfStLfHuUQ6bFw3zVEU9f8Tt+v+YMU+6ygBNCV+9ynofBHp2n+sAUoJt2sGw0a5VAdgyFACNY7bIxPaKBe6RUgcY4mSo/eZQFAH8meZCYUbil4/qSz7KpRNkEkpyuzC3Fr15n8OBZp3TIme1KKl5RUK0VVsNKN7jQdylMWT1/HGOcBITFUxD5VU5FSVwYYF7WvzaINJIztvTgHuXfg2L6Gn74KEaFGAVWlAzph2AiRyfUPqWJPzd0XiQ9qeCqjo3eblfM0K8Jinab3kHk5I0ow0+35Hq2HKfu9EMP5lbYkX67rh/Fslo8TF+F4o24KV2ds2UAmwoOieixvNmSVUzN3KeziIRztNq+hgWP2VV+0y/THI6HDtwnO8v0MZbDGhAaUHQhW7vdddk1acNBS/k3l/VEyN7EFFtilNBCPOqNgk5d+WQDx9DdAa9uUAfT48LrO9K7bKWEx70nd55Se08xn3cBXok2kSssEyWmyOGtZ7sqUFpM0ML+E9mkUK6DhRBzc1E7Dhg+WWiLLaZpvNwpml+anSnTIiIEUVOUrVaGgtDLFSbNAS5B58wuy25xaoo/+XVn2orq+Ayf3YjqjlK+KnlGVBtLVMnbXMFYDnjn5qOF+kpZwGqhz6giUjJjJMVWVrh7VkUZ8C/AHzeXnueYDuhrgskt+OpkBfFHjw0gZQTtnaI6dqXaZS/29TcP4Z7loQ4WKhsrLLAvxC4joZUZC3F4+gVJXswk7JhZqKeK2eOw/XXO2MZF9G5nKfzWxL2DaQNsf5zW/WBFy0jFs2+zKOhCCx5VpKDSWlm8NSaE8mLAHBt1u7UJbp2YFEwfx2Rebm4lO3uxtYklNoh3EmlfPl8ueVISAfQP4lTe+fVp8Tw2+vGF2noJq2Z9xNxpSYGYTzCXMN/aNK5CTk/7hHu1dcLCz/J9tNENrv9Z9safJHvNQrCbm/dZ3QBQmyxtfveDasvmxxAXAAAAAAAAAAAA=" alt="Mastercard" />
+              <img src="https://th.bing.com/th?id=OIF.aq7qEeR3hBHa3%2f35JrKeBQ&rs=1&pid=ImgDetMain&o=7&rm=3" alt="JCB" />
+              <img src="https://tse4.mm.bing.net/th/id/OIP.1GNvjAZu4hlbE0bWflshGwHaHa?rs=1&pid=ImgDetMain&o=7&rm=3" alt="Momo" />
+              <img src="https://vnpay.vn/s1/statics.vnpay.vn/2023/9/06ncktiwd6dc1694418196384.png" alt="VNPay" />
+              <img src="https://tse4.mm.bing.net/th/id/OIP.dqBGQAVmIM35FLHSndWGLwHaHa?rs=1&pid=ImgDetMain&o=7&rm=3" alt="ZaloPay" />
+            </div>
+          </div>
+
+          {/* Cột 4: Tải ứng dụng & Mạng xã hội */}
+          <div className="footer-section">
+            <h4>Tải ứng dụng</h4>
+            <div className="app-links">
+              <a href="#appstore"><img src="https://logos-world.net/wp-content/uploads/2021/02/App-Store-Logo-2017-present.jpg" alt="Download on the App Store" /></a>
+              <a href="#googleplay"><img src="https://tse3.mm.bing.net/th/id/OIP.YnbMwzlTZYXnaG16-rZzSgHaHa?pid=ImgDet&w=474&h=474&rs=1&o=7&rm=3" alt="Get it on Google Play" /></a>
+            </div>
+            
+            <h4>Kết nối với chúng tôi</h4>
+            <div className="social-links">
+              <a href="#facebook">Facebook</a>
+              <a href="#zalo">Zalo</a>
+              <a href="#youtube">YouTube</a>
+            </div>
+          </div>
+
+        </div>
+
+        {/* Phần bản quyền (dưới cùng) */}
+        <div className="footer-bottom">
+          <div className="copyright">
+            © 2025 Vé Xe Online — Trải nghiệm đặt vé dễ dàng & nhanh chóng
+          </div>
+          <div className="bct-logo">
+            <a href="#bct-link">
+            <img 
+  src="https://i.fbcd.co/products/resized/resized-750-500/ex-xe-unique-logo-designs-2-cbd6a550a2914ecce39886496ac239ae46c1fa8b2de4f4372f4a20cfd7121789.jpg" 
+  alt="Đã thông báo bộ công thương " 
+  style={{
+    width: '100px',       // 👈 kích thước ngang
+    height: 'auto',       // tự điều chỉnh theo tỉ lệ
+    marginBottom: '15px',
+    borderRadius: '8px',  // bo góc nhẹ (nếu muốn)
+  }} 
+/>
+
+            </a>
+          </div>
+        </div>
       </footer>
+    </div>
     </div>
   );
 }
