@@ -1,58 +1,26 @@
-const express = require("express");
-const router = express.Router();
-const multer = require("multer");
-const Trip = require("../models/tripModel");
+import Trip from "../models/tripModel.js";
 
-// ========================
-// ⚙️ Cấu hình Multer (upload ảnh)
-// ========================
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, "uploads/"); // thư mục lưu ảnh
-  },
-  filename: (req, file, cb) => {
-    cb(null, Date.now() + "_" + file.originalname);
-  },
-});
-
-const upload = multer({ storage });
-
-// ========================
-// 🟢 1️⃣ Lấy danh sách chuyến xe
-// ========================
-router.get("/", async (req, res) => {
+// 🔍 Lấy tất cả chuyến xe
+export const getAllTrips = async (req, res) => {
   try {
-    const trips = await Trip.find();
-    res.json(trips);
+    const trips = await Trip.find().sort({ createdAt: -1 });
+    res.status(200).json(trips);
   } catch (error) {
-    console.error("❌ Error getting trips:", error);
-    res.status(500).json({ message: "Lỗi khi lấy danh sách chuyến xe" });
+    console.error("❌ Lỗi khi lấy danh sách chuyến xe:", error);
+    res.status(500).json({ message: "Lỗi khi lấy danh sách chuyến xe", error });
   }
-});
+};
 
-// ========================
-// 🟢 2️⃣ Xem chi tiết 1 chuyến xe
-// ========================
-router.get("/:id", async (req, res) => {
+// 🆕 Tạo chuyến xe mới
+// 🆕 Tạo chuyến xe mới
+export const createTrip = async (req, res) => {
   try {
-    const trip = await Trip.findById(req.params.id);
-    if (!trip) return res.status(404).json({ message: "Không tìm thấy chuyến xe" });
-    res.json(trip);
-  } catch (error) {
-    res.status(500).json({ message: "Lỗi khi lấy chi tiết chuyến xe" });
-  }
-});
-
-// ========================
-// 🟢 3️⃣ Thêm chuyến xe mới (có upload ảnh)
-// ========================
-router.post("/", upload.single("image"), async (req, res) => {
-  try {
-    const { tenChuyen, tu, den, ngayKhoiHanh, gioKhoiHanh, giaVe, soLuongGhe, nhaXe } = req.body;
-    const imagePath = req.file ? req.file.path : null;
-
-    const newTrip = new Trip({
+    const {
       tenChuyen,
+      maTai,
+      loaiXe,
+      hangXe,
+      mauSac,
       tu,
       den,
       ngayKhoiHanh,
@@ -60,67 +28,85 @@ router.post("/", upload.single("image"), async (req, res) => {
       giaVe,
       soLuongGhe,
       nhaXe,
-      image: imagePath,
-      trangThai: "Hoạt động",
+      partnerId,   // Firebase UID
+      trangThai,
+      hinhAnh,
+    } = req.body;
+
+    // Kiểm tra dữ liệu đầu vào
+    if (!tenChuyen || !tu || !den || !giaVe || !soLuongGhe || !nhaXe) {
+      return res.status(400).json({ message: "Vui lòng nhập đủ thông tin bắt buộc" });
+    }
+
+    // ❗ BẮT BUỘC: partnerId phải có
+    if (!partnerId || partnerId.trim() === "") {
+      return res.status(400).json({
+        message: "Thiếu partnerId (Firebase UID của nhà xe)!",
+      });
+    }
+
+    const newTrip = new Trip({
+      tenChuyen,
+      maTai,
+      loaiXe,
+      hangXe,
+      mauSac,
+      tu,
+      den,
+      ngayKhoiHanh,
+      gioKhoiHanh,
+      giaVe,
+      soLuongGhe,
+      nhaXe,
+      partnerId: String(partnerId), // đảm bảo luôn string
+      trangThai,
+      hinhAnh,
     });
 
     await newTrip.save();
     res.status(201).json(newTrip);
   } catch (error) {
-    console.error("❌ Error creating trip:", error);
-    res.status(500).json({ message: "Lỗi khi tạo chuyến xe" });
+    console.error("❌ Lỗi khi tạo chuyến xe:", error);
+    res.status(500).json({ message: "Lỗi khi tạo chuyến xe", error });
   }
-});
+};
 
-// ========================
-// 🟢 4️⃣ Cập nhật chuyến xe (cho phép đổi ảnh mới)
-// ========================
-router.put("/:id", upload.single("image"), async (req, res) => {
+// ✏️ Cập nhật chuyến xe
+export const updateTrip = async (req, res) => {
   try {
-    const { tenChuyen, tu, den, ngayKhoiHanh, gioKhoiHanh, giaVe, soLuongGhe, nhaXe, trangThai } = req.body;
-
-    const updateData = {
-      tenChuyen,
-      tu,
-      den,
-      ngayKhoiHanh,
-      gioKhoiHanh,
-      giaVe,
-      soLuongGhe,
-      nhaXe,
-      trangThai,
-    };
-
-    // Nếu có ảnh mới thì cập nhật đường dẫn ảnh
-    if (req.file) updateData.image = req.file.path;
-
-    const updatedTrip = await Trip.findByIdAndUpdate(req.params.id, updateData, {
+    const { id } = req.params;
+    const updatedTrip = await Trip.findByIdAndUpdate(id, req.body, {
       new: true,
+      runValidators: true,
     });
-
-    if (!updatedTrip)
-      return res.status(404).json({ message: "Không tìm thấy chuyến xe" });
-
-    res.json(updatedTrip);
+    if (!updatedTrip) return res.status(404).json({ message: "Không tìm thấy chuyến xe" });
+    res.status(200).json(updatedTrip);
   } catch (error) {
-    console.error("❌ Error updating trip:", error);
-    res.status(500).json({ message: "Lỗi khi cập nhật chuyến xe" });
+    console.error("❌ Lỗi khi cập nhật chuyến xe:", error);
+    res.status(500).json({ message: "Lỗi khi cập nhật chuyến xe", error });
   }
-});
+};
 
-// ========================
-// 🟢 5️⃣ Xóa chuyến xe
-// ========================
-router.delete("/:id", async (req, res) => {
+// ❌ Xóa chuyến xe
+export const deleteTrip = async (req, res) => {
   try {
-    const deletedTrip = await Trip.findByIdAndDelete(req.params.id);
-    if (!deletedTrip)
-      return res.status(404).json({ message: "Không tìm thấy chuyến xe" });
+    const trip = await Trip.findByIdAndDelete(req.params.id);
+    if (!trip) return res.status(404).json({ message: "Không tìm thấy chuyến xe" });
     res.json({ message: "Đã xóa chuyến xe thành công" });
   } catch (error) {
-    console.error("❌ Error deleting trip:", error);
-    res.status(500).json({ message: "Lỗi khi xóa chuyến xe" });
+    console.error("❌ Lỗi khi xóa chuyến xe:", error);
+    res.status(500).json({ message: "Lỗi khi xóa chuyến xe", error });
   }
-});
+};
 
-module.exports = router;
+// 🔍 Lấy chuyến theo ID
+export const getTripById = async (req, res) => {
+  try {
+    const trip = await Trip.findById(req.params.id);
+    if (!trip) return res.status(404).json({ message: "Không tìm thấy chuyến xe" });
+    res.status(200).json(trip);
+  } catch (error) {
+    console.error("❌ Lỗi khi lấy chi tiết chuyến xe:", error);
+    res.status(500).json({ message: "Lỗi khi lấy chi tiết chuyến xe", error });
+  }
+};

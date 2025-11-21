@@ -12,15 +12,20 @@
   "author": "Le Nhat Tan",
   "license": "ISC",
   "dependencies": {
+    "cloudinary": "^2.8.0",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "express": "^5.1.0",
     "express-list-endpoints": "^7.1.1",
     "mongoose": "^8.19.2",
     "morgan": "^1.10.1",
-    "multer": "^2.0.2"
+    "multer": "^2.0.2",
+    "socket.io": "^4.8.1",
+    "socket.io-client": "^4.8.1",
+    "streamifier": "^0.1.1"
   },
   "devDependencies": {
+    "@types/socket.io-client": "^1.4.36",
     "nodemon": "^3.1.10"
   }
 }
