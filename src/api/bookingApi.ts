@@ -6,11 +6,24 @@ const API_URL = "http://localhost:5000/api/bookings";
 // ✅ Đặt vé
 export const bookTicket = async (data: any) => {
   try {
-    // Đảm bảo soGhe là number[] nếu được truyền vào
+    console.log("🚀 [bookTicket] Dữ liệu gửi lên:", data);
+    
+    if (!data.userId) {
+      console.error("❌ Lỗi: Thiếu userId");
+      throw new Error("userId không tồn tại");
+    }
+    if (!data.tripId) {
+      console.error("❌ Lỗi: Thiếu tripId");
+      throw new Error("tripId không tồn tại");
+    }
+    if (!data.soGhe || data.soGhe.length === 0) {
+      console.error("❌ Lỗi: Thiếu soGhe");
+      throw new Error("soGhe không tồn tại");
+    }
+
     const requestData: any = { ...data };
     
     if (data.soGhe !== undefined) {
-      // Convert soGhe sang number[] nếu là string[]
       requestData.soGhe = Array.isArray(data.soGhe)
         ? data.soGhe.map((seat: any) => {
             const num = Number(seat);
@@ -19,7 +32,7 @@ export const bookTicket = async (data: any) => {
         : [Number(data.soGhe)];
     }
     
-    console.log("📤 Gửi request đặt vé:", requestData);
+    console.log("✅ [bookTicket] Request data đã chuẩn bị:", requestData);
     
     const res = await axios.post(`${API_URL}/book`, requestData, {
       headers: {
@@ -27,12 +40,14 @@ export const bookTicket = async (data: any) => {
       }
     });
     
-    console.log("✅ Đặt vé thành công:", res.data);
+    console.log("✅ [bookTicket] Thành công! Response:", res.data);
     return res.data;
   } catch (error: any) {
-    console.error("❌ Lỗi đặt vé:", error);
-    console.error("❌ Response data:", error?.response?.data);
-    console.error("❌ Request data:", error?.config?.data);
+    console.error("❌ [bookTicket] Lỗi:", {
+      message: error.message,
+      response: error.response?.data,
+      status: error.response?.status,
+    });
     throw error;
   }
 };
@@ -321,9 +336,14 @@ export const updateBookingPayment = async (id: string, method: "bank" | "cash") 
 export const getBookingsByPartnerId = async (partnerId: string) => {
   try {
     const res = await axios.get(`${API_URL}/partner/${partnerId}`);
-    return res.data;
+    return res.data.bookings || res.data;
   } catch (error) {
-    console.error("❌ Lỗi getBookingsByPartnerId:", error);
+    console.error("❌ Error fetching bookings:", error);
     throw error;
   }
+};
+
+export default {
+  getBookingsByPartnerId,
+  updateBookingStatus,
 };
