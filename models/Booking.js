@@ -1,7 +1,7 @@
 // 📁 models/Booking.js
 import mongoose from "mongoose";
 
-const bookingSchema = new mongoose.Schema(
+const BookingSchema = new mongoose.Schema(
   {
     userId: { 
       type: String, 
@@ -12,7 +12,10 @@ const bookingSchema = new mongoose.Schema(
       type: String,   // Firebase UID
       required: true
     },
-
+feeApplied: {
+  type: Number,
+  default: 0
+},
     tripId: { 
       type: mongoose.Schema.Types.ObjectId, 
       ref: "Trip", 
@@ -89,10 +92,28 @@ const bookingSchema = new mongoose.Schema(
     gioKhoiHanh: {
       type: String,
       default: ""
-    }
+    },
+     feeApplied: {
+      type: Number,
+      default: 0,
+      // ← Phí % được áp dụng khi booking được tạo
+    },
+    serviceFeeAmount: {
+      type: Number,
+      default: 0,
+      // ← Số tiền phí (tính = finalTotal * feeApplied / 100)
+    },
+    feeAppliedAt: {
+      type: Date,
+      // ← Lưu ngày lúc áp dụng phí
+    },
+       feePercent: {                    // ✅ THÊM FIELD NÀY
+      type: Number,
+      default: 0,
+    },
   },
 
   { timestamps: true }
 );
 
-export default mongoose.model("Booking", bookingSchema);
+export default mongoose.model("Booking", BookingSchema);

@@ -17,11 +17,15 @@ import pointRoutes from "./routes/pointRoutes.js";
 import paymentMethodRoutes from "./routes/paymentMethodRoutes.js";
 import reviewRoutes from "./routes/reviewRoutes.js";
 import statsRoutes from "./routes/statsRoutes.js";
-import withdrawRoutes from "./routes/withdrawRoutes.js";
+import feeRoutes from "./routes/feeRoutes.js";
+import payosRoutes from "./routes/payosRoutes.js";
+import withdrawalRoutes from "./routes/withdrawalRoutes.js";
+
 dotenv.config();
 
 const app = express();
 app.use(cors());
+// Default JSON parser for most routes
 app.use(express.json());
 
 // ⚙️ HTTP + Socket.IO
@@ -37,13 +41,11 @@ const onlineUsers = new Map();
 io.on("connection", (socket) => {
   console.log("🟢 Client connected:", socket.id);
 
-  // FE gọi: socket.emit("registerUser", userId)
   socket.on("registerUser", (userId) => {
     onlineUsers.set(userId, socket.id);
     console.log(`✔ User ${userId} registered with socket: ${socket.id}`);
   });
 
-  // Khi disconnect -> xoá user khỏi map
   socket.on("disconnect", () => {
     for (const [uid, sid] of onlineUsers.entries()) {
       if (sid === socket.id) {
@@ -64,6 +66,7 @@ mongoose
   .then(() => console.log("✅ MongoDB connected"))
   .catch((err) => console.error("❌ MongoDB error:", err));
 
+// Simple request logger
 app.use((req, _, next) => {
   console.log(`📍 ${req.method} ${req.path}`);
   next();
@@ -82,7 +85,18 @@ app.use("/api/points", pointRoutes);
 app.use("/api/payment-method", paymentMethodRoutes);
 app.use("/api/review", reviewRoutes);
 app.use("/api/stats", statsRoutes);
-app.use("/api/withdraw", withdrawRoutes);
+
+app.use("/api/fees", feeRoutes);
+
+app.use("/api/payos", payosRoutes);
+
+// add these two so FE requests match both paths
+app.use("/api/withdrawals", withdrawalRoutes);
+app.use("/api/withdraws", withdrawalRoutes); // compatibility with frontend
+
+// Fallback route
+app.use((req, res) => res.status(404).json({ message: "Not found" }));
+
 // Run server
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {

@@ -2,12 +2,22 @@ import Booking from "../models/Booking.js";
 import Trip from "../models/tripModel.js";
 import Review from "../models/Review.js";
 import mongoose from "mongoose";
+import FeeConfig from "../models/FeeConfig.js";
+import FeeHistory from "../models/FeeHistory.js";
 
 /**
  * ===================================================
- * 🧩 1. Đặt vé
+ * 📝 ĐẶT VÉ / BOOK TICKET
  * ===================================================
  */
+// ✅ Tạo helper function để lấy phí hiện tại
+const getCurrentFeePercent = async () => {
+  const feeRecord = await FeeHistory.findOne()
+    .sort({ createdAt: -1 })  // ⚠️ Mới nhất theo createdAt
+    .lean();
+  return feeRecord?.newPercent || 0;
+};
+
 export const bookTicket = async (req, res) => {
   try {
     const { userId, tripId, hoTen, sdt, soGhe, totalPrice, paymentMethod } = req.body;
@@ -19,31 +29,52 @@ export const bookTicket = async (req, res) => {
     const trip = await Trip.findById(tripId);
     if (!trip) return res.status(404).json({ message: "Không tìm thấy chuyến đi" });
 
-    // 🛑 Kiểm tra trùng ghế
+    // 🛑 Kiểm tra ghế đã bị đặt chưa
     const existingBookings = await Booking.find({ tripId });
     const bookedSeats = existingBookings.flatMap((b) => b.soGhe);
     const conflict = soGhe.some((seat) => bookedSeats.includes(seat));
 
     if (conflict) return res.status(400).json({ message: "Ghế đã được đặt" });
 
-    // ✔ Tạo booking mới
+    // ✅ FIX: Dùng helper function
+    const feePercent = await getCurrentFeePercent();
+    const serviceFeeAmount = Math.round(totalPrice * (feePercent / 100));
+
+    console.log("✅ bookTicket - Phí áp dụng:", { feePercent, serviceFeeAmount });
+
+    // Tạo booking
     const newBooking = new Booking({
       userId: String(userId),
       tripId,
       hoTen,
       sdt,
       soGhe,
-      partnerId: trip.partnerId,  // 🔥 THÊM DÒNG NÀY
+      partnerId: trip.partnerId,
       totalPrice,
+      finalTotal: totalPrice,
+      feePercent,
+      feeApplied: feePercent,
+      serviceFeeAmount,
+      feeAppliedAt: new Date(),
       paymentMethod: paymentMethod || "cash",
       status: paymentMethod === "cash" ? "paid" : "pending",
     });
 
     await newBooking.save();
-    return res.status(201).json({ message: "✅ Đặt vé thành công!", booking: newBooking });
+
+    return res.status(201).json({
+      success: true,
+      message: "✅ Đặt vé thành công!",
+      booking: newBooking
+    });
+
   } catch (err) {
-    console.error("❌ Lỗi khi đặt vé:", err);
-    return res.status(500).json({ message: "Lỗi server khi đặt vé", error: err.message });
+    console.error("❌ bookTicket error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Lỗi server",
+      error: err.message
+    });
   }
 };
 
@@ -126,28 +157,63 @@ export const updateBookingStatus = async (req, res) => {
       diemDonChiTiet
     } = req.body;
 
+    const booking = await Booking.findById(req.params.id);
+    if (!booking) {
+      return res.status(404).json({ success: false, message: "Không tìm thấy vé" });
+    }
+
     const updateData = { status };
 
     if (paymentMethod) updateData.paymentMethod = paymentMethod;
     updateData.voucherCode = voucherCode ?? null;
     updateData.discountAmount = discountAmount ?? 0;
-    updateData.finalTotal = finalTotal ?? 0;
+    updateData.finalTotal = finalTotal ?? booking.totalPrice;
     updateData.diemDonChiTiet = diemDonChiTiet?.trim() || null;
 
-    const booking = await Booking.findByIdAndUpdate(
+    // ✅ FIX: Khi duyệt (status = "paid"), tính & lưu phí nếu chưa có
+    if (status === "paid" && !booking.feePercent) {
+      const feePercent = await getCurrentFeePercent();  // ✅ Dùng helper
+      const price = finalTotal || booking.totalPrice || 0;
+      const serviceFeeAmount = Math.round(price * (feePercent / 100));
+
+      updateData.feePercent = feePercent;
+      updateData.feeApplied = feePercent;
+      updateData.serviceFeeAmount = serviceFeeAmount;
+      updateData.feeAppliedAt = new Date();
+
+      console.log("✅ Approving booking with fee:", {
+        bookingId: req.params.id,
+        feePercent,
+        serviceFeeAmount,
+        totalPrice: price,
+      });
+    }
+
+    const updatedBooking = await Booking.findByIdAndUpdate(
       req.params.id,
       updateData,
       { new: true }
     ).populate("tripId").populate("userId");
 
-    if (!booking) {
-      return res.status(404).json({ message: "Không tìm thấy vé" });
-    }
+    console.log("✅ Updated booking:", {
+      _id: updatedBooking._id,
+      status: updatedBooking.status,
+      feePercent: updatedBooking.feePercent,
+      serviceFeeAmount: updatedBooking.serviceFeeAmount,
+    });
 
-    res.json({ message: "Cập nhật trạng thái thành công", booking });
+    res.json({ 
+      success: true,
+      message: "✅ Cập nhật trạng thái thành công", 
+      booking: updatedBooking 
+    });
   } catch (err) {
-    console.error("Lỗi khi cập nhật trạng thái vé:", err);
-    res.status(500).json({ message: "Lỗi khi cập nhật trạng thái vé", error: err.message });
+    console.error("❌ Lỗi updateBookingStatus:", err);
+    res.status(500).json({ 
+      success: false,
+      message: "Lỗi khi cập nhật trạng thái vé", 
+      error: err.message 
+    });
   }
 };
 
@@ -194,40 +260,37 @@ export const cancelBooking = async (req, res) => {
  */
 export const updateBooking = async (req, res) => {
   try {
-    const { hoTen, sdt, soGhe, totalPrice } = req.body;
-    const booking = await Booking.findById(req.params.id);
+    const { status, finalTotal } = req.body;
+    const bookingId = req.params.id;
 
-    if (!booking) {
-      return res.status(404).json({ message: "Không tìm thấy vé cần cập nhật" });
-    }
+    const booking = await Booking.findById(bookingId);
+    if (!booking) return res.status(404).json({ success: false, message: "Booking not found" });
 
-    // Kiểm tra trùng ghế nếu thay đổi ghế
-    if (soGhe && soGhe.length > 0) {
-      const existingBookings = await Booking.find({
-        tripId: booking.tripId,
-        _id: { $ne: booking._id },
+    // ✅ CHỈ tính phí khi LẦN ĐẦU mark "paid"
+    if (status === "paid" && booking.status !== "paid") {
+      const feeRecord = await FeeHistory.findOne()
+        .sort({ createdAt: -1 })
+        .lean();
+
+      const feePercent = feeRecord?.newPercent || 0;
+      const serviceFeeAmount = Math.round((finalTotal || booking.totalPrice || 0) * (feePercent / 100));
+
+      booking.status = "paid";
+      booking.feePercent = feePercent;
+      booking.serviceFeeAmount = serviceFeeAmount;
+      booking.feeAppliedAt = new Date();
+
+      console.log("✅ [First time paid] Fee calculated:", {
+        feePercent,
+        serviceFeeAmount
       });
-
-      const bookedSeats = existingBookings.flatMap((b) => b.soGhe);
-      const conflict = soGhe.some((seat) => bookedSeats.includes(seat));
-
-      if (conflict) {
-        return res.status(400).json({ message: "Ghế đã được đặt, vui lòng chọn ghế khác!" });
-      }
-
-      booking.soGhe = soGhe;
     }
-
-    if (hoTen) booking.hoTen = hoTen;
-    if (sdt) booking.sdt = sdt;
-    if (totalPrice) booking.totalPrice = totalPrice;
 
     await booking.save();
-
-    res.json({ message: "✅ Cập nhật vé thành công!", booking });
+    res.json({ success: true, message: "✅ Cập nhật vé thành công!", booking });
   } catch (err) {
-    console.error("❌ Lỗi khi cập nhật vé:", err);
-    res.status(500).json({ message: "Lỗi server khi cập nhật vé", error: err.message });
+    console.error("❌ Error:", err);
+    res.status(500).json({ success: false, error: err.message });
   }
 };
 
@@ -338,61 +401,91 @@ export const getBookingById = async (req, res) => {
     res.status(500).json({ message: "Lỗi server", error: error.message });
   }
 };
-// ============================================================
-// 🆕 LẤY DANH SÁCH VÉ THEO partnerId (DÙNG CHO DOANH THU PARTNER)
-// ============================================================
-// ============================================================
-// 🆕 LẤY DANH SÁCH VÉ THEO partnerId (DÙNG CHO DOANH THU PARTNER)
-// ============================================================
+
+/**
+ * ===================================================
+ * 🆕 LẤY DANH SÁCH VÉ THEO partnerId
+ * ===================================================
+ */
 export const getBookingsByPartner = async (req, res) => {
   try {
     const { partnerId } = req.params;
 
     if (!partnerId) {
-      return res.status(400).json({ message: "partnerId is required" });
+      return res.status(400).json({ success: false, message: "partnerId is required" });
     }
 
-    // Lấy booking + thông tin chuyến
-    const bookings = await Booking.find({
-      partnerId,
-      status: { $in: ["paid", "completed", "done"] },
-    })
-      .populate("tripId") // Lấy full thông tin chuyến
+    // Lấy tất cả booking
+    const bookings = await Booking.find({ partnerId })
+      .populate("tripId")
       .sort({ createdAt: -1 });
 
-    // ⭐ Map lại dữ liệu để FE có đủ field
-    const formatted = bookings.map((b) => ({
-      _id: b._id,
-      userId: b.userId,
-      partnerId: b.partnerId,
-      tripId: b.tripId?._id || null,
+    if (!bookings || bookings.length === 0) {
+      return res.status(200).json({
+        success: true,
+        bookings: [],
+        message: "Không có booking nào"
+      });
+    }
 
-      hoTen: b.hoTen,
-      sdt: b.sdt,
-      soGhe: b.soGhe,
-      totalPrice: b.totalPrice,
-      discountAmount: b.discountAmount,
-      finalTotal: b.finalTotal,
+    // ✅ Map dữ liệu - ĐẢM BẢO RETURN ĐÚNG FIELD
+    const formatted = bookings.map((b) => {
+      const price = b.finalTotal || b.totalPrice || 0;
+      // ✅ LẤY feePercent - ưu tiên feePercent, nếu không có lấy feeApplied
+      const feePercent = b.feePercent !== undefined ? b.feePercent : (b.feeApplied || 0);
+      const serviceFee = b.serviceFeeAmount || (price * (feePercent / 100));
 
-      diemDonChiTiet: b.diemDonChiTiet,
-      status: b.status,
-      paymentMethod: b.paymentMethod,
-      voucherCode: b.voucherCode,
+      return {
+        _id: b._id,
+        userId: b.userId,
+        partnerId: b.partnerId,
+        tripId: b.tripId?._id || null,
 
-      // ⭐ Gán thông tin chuyến từ tripId vào booking
-      tenChuyen: b.tenChuyen || b.tripId?.tenChuyen || "",
-      ngayKhoiHanh: b.ngayKhoiHanh || b.tripId?.ngayKhoiHanh || "",
-      gioKhoiHanh: b.gioKhoiHanh || b.tripId?.gioKhoiHanh || "",
+        hoTen: b.hoTen,
+        sdt: b.sdt,
+        soGhe: b.soGhe || [],
 
-      createdAt: b.createdAt,
-    }));
+        totalPrice: price,
+        discountAmount: b.discountAmount || 0,
+        finalTotal: b.finalTotal || b.totalPrice || 0,
+
+        diemDonChiTiet: b.diemDonChiTiet,
+        status: b.status,
+        paymentMethod: b.paymentMethod,
+        voucherCode: b.voucherCode,
+
+        // ✅ QUAN TRỌNG: Đảm bảo return các field phí này
+        feePercent: feePercent,
+        feeApplied: feePercent,
+        serviceFeeAmount: serviceFee,
+        feeAppliedAt: b.feeAppliedAt,
+
+        tenChuyen: b.tenChuyen || b.tripId?.tenChuyen || "N/A",
+        ngayKhoiHanh: b.ngayKhoiHanh || b.tripId?.ngayKhoiHanh || "",
+        gioKhoiHanh: b.gioKhoiHanh || b.tripId?.gioKhoiHanh || "",
+
+        createdAt: b.createdAt,
+        updatedAt: b.updatedAt,
+      };
+    });
+
+    console.log("✅ getBookingsByPartner response:", {
+      count: formatted.length,
+      firstBooking: formatted[0],
+    });
 
     return res.status(200).json({
       success: true,
+      count: formatted.length,
       bookings: formatted,
     });
+
   } catch (error) {
     console.error("❌ Lỗi getBookingsByPartner:", error);
-    return res.status(500).json({ success: false, message: "Lỗi server" });
+    return res.status(500).json({
+      success: false,
+      message: "Lỗi server",
+      error: error.message
+    });
   }
 };

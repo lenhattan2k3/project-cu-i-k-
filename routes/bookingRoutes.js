@@ -11,53 +11,37 @@ import {
   getBookingsByRole,
   updatePaymentStatus,
   getBookingById,
-  getBookingsByPartner,   // ✔ đúng tên hàm
+  getBookingsByPartner,
 } from "../controllers/bookingController.js";
 
 const router = express.Router();
 
 // ==========================
-// 1️⃣ ROUTES CỤ THỂ → ĐẶT TRƯỚC
+// 1️⃣ ROUTES CỤ THỂ (ĐẶT TRƯỚC)
 // ==========================
 
-// Đặt vé mới
+// POST routes
 router.post("/book", bookTicket);
 
-// Lấy vé theo userId
+// GET routes với path cụ thể
 router.get("/user/:userId", getBookingsByUser);
-
-// Lấy vé theo số điện thoại
 router.get("/phone/:sdt", getBookingsByPhone);
-
-// Lấy ghế đã đặt theo tripId
 router.get("/trip/:tripId/seats", getBookedSeats);
-
-// ⭐ Lấy vé theo partnerId (doanh thu Partner)
 router.get("/partner/:partnerId", getBookingsByPartner);
-
-// Lấy vé theo role (admin/partner/user)
 router.get("/role/:role", getBookingsByRole);
 
-// Cập nhật trạng thái vé
+// PUT routes
 router.put("/status/:id", updateBookingStatus);
-
-// Cập nhật trạng thái thanh toán
 router.put("/payment/:id", updatePaymentStatus);
+router.put("/:id", updateBooking);  // ✅ Gọi function từ controller
 
-// Cập nhật thông tin vé
-router.put("/:id", updateBooking);
-
-// Hủy vé
+// DELETE routes
 router.delete("/:id", cancelBooking);
 
 // ==========================
-// 2️⃣ ROUTES DANH SÁCH / GET ALL
+// 2️⃣ ROUTES GENERIC (ĐẶT CUỐI)
 // ==========================
-router.get("/", getAllBookings);
-
-// ==========================
-// 3️⃣ VÉ THEO ID — ĐẶT CUỐI
-// ==========================
-router.get("/:id", getBookingById);
+router.get("/", getAllBookings);          // ⚠️ GET all - CUỐI CÙNG
+router.get("/:id", getBookingById);       // ⚠️ GET by ID - CUỐI CÙNG
 
 export default router;
