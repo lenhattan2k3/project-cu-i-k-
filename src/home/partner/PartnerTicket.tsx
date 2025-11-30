@@ -1,8 +1,9 @@
   // PartnerTicket.tsx
-  import React, { useEffect, useState } from "react";
+  import React, { useEffect, useMemo, useState } from "react";
   import axios from "axios";
+  import { getAuth, onAuthStateChanged } from "firebase/auth";
   import { getAllTrips } from "../../api/tripApi";
-  import { getAllBookings, getBookedSeats, cancelBooking, updateBookingStatus, updateBooking, saveMarkedSeats, getMarkedSeats, bookTicket } from "../../api/bookingApi";
+  import { bookTicket, cancelBooking, getBookedSeats, getBookingsByPartnerId, getMarkedSeats, saveMarkedSeats, updateBooking, updateBookingStatus } from "../../api/bookingApi";
 
   interface Trip {
     _id: string;
@@ -34,6 +35,8 @@
     const [trips, setTrips] = useState<Trip[]>([]);
     const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
     const [loading, setLoading] = useState(true);
+    const [partnerId, setPartnerId] = useState<string>("");
+    const [authChecked, setAuthChecked] = useState(false);
 
     // state cho seat manager (mới)
     const [tripForManage, setTripForManage] = useState<Trip | null>(null);
@@ -57,8 +60,30 @@
     const [quickBookSdt, setQuickBookSdt] = useState("");
     const [quickBookLoading, setQuickBookLoading] = useState(false);
 
+    // Firebase auth guard để biết partner đang đăng nhập
+    useEffect(() => {
+      const auth = getAuth();
+      const unsubscribe = onAuthStateChanged(auth, (user) => {
+        setPartnerId(user?.uid || "");
+        setAuthChecked(true);
+
+        if (!user) {
+          setTrips([]);
+          setBookings([]);
+          setTripForManage(null);
+          setTripSelectedSeats([]);
+          setTripBookedSeats([]);
+          setTripBookingsOfSelected([]);
+          setSelectedBooking(null);
+        }
+      });
+
+      return () => unsubscribe();
+    }, []);
+
     // ---------- Helpers: parse responses safely ----------
     const parseBookingsArrayFromRes = (resData: any): Booking[] => {
+      if (!resData) return [];
       // Nếu backend trả về mảng booking => dùng luôn
       if (Array.isArray(resData)) return resData as Booking[];
       // Nếu backend trả về object { bookedSeats: [...] } -> không phải booking list
@@ -70,41 +95,82 @@
     };
 
 
-    // ban đầu fetch cả trips + bookings (giữ nguyên logic)
+    // reload data mỗi khi partner đăng nhập/log out
     useEffect(() => {
-      const fetchAll = async () => {
-        try {
-          setLoading(true);
-          const [tripData, bookingData] = await Promise.all([
-            (async () => {
-              try {
-                return await getAllTrips();
-              } catch {
-                const res = await axios.get("http://localhost:5000/api/trips");
-                return res.data;
-              }
-            })(),
-            (async () => {
-              try {
-                return await getAllBookings();
-              } catch {
-                const res = await axios.get("http://localhost:5000/api/bookings");
-                return res.data;
-              }
-            })(),
-          ]);
+      if (!authChecked) return;
 
-          setTrips(tripData || []);
-          setBookings(bookingData || []);
-        } catch (err) {
-          console.error("Lỗi khi tải dữ liệu:", err);
-        } finally {
-          setLoading(false);
-        }
-      };
+      if (!partnerId) {
+        setLoading(false);
+        return;
+      }
 
-      fetchAll();
-    }, []);
+      reloadAllData(partnerId);
+    }, [authChecked, partnerId]);
+
+    useEffect(() => {
+      if (!partnerId) return;
+      setTripForManage(null);
+      setTripSelectedSeats([]);
+      setTripBookedSeats([]);
+      setTripBookingsOfSelected([]);
+    }, [partnerId]);
+
+    const visibleBookings = useMemo(
+      () => bookings.filter((b) => !(b.hoTen === "_MARKED_SEATS_" && b.sdt === "_PARTNER_MARKED_")),
+      [bookings]
+    );
+
+    const paidCount = useMemo(() => visibleBookings.filter((b) => b.status === "paid").length, [visibleBookings]);
+    const unpaidCount = useMemo(() => visibleBookings.filter((b) => b.status !== "paid").length, [visibleBookings]);
+    const totalRevenue = useMemo(
+      () => visibleBookings.reduce((sum, b) => sum + (b.totalPrice || 0), 0),
+      [visibleBookings]
+    );
+    const occupiedSeats = useMemo(
+      () => visibleBookings.reduce((sum, b) => sum + ((Array.isArray(b.soGhe) ? b.soGhe.length : 0)), 0),
+      [visibleBookings]
+    );
+    const totalSeats = useMemo(() => trips.reduce((sum, trip) => sum + (trip.soGhe || 0), 0), [trips]);
+    const occupancyRate = totalSeats > 0 ? Math.min(100, Math.round((occupiedSeats / totalSeats) * 100)) : 0;
+    const paymentRate = visibleBookings.length > 0 ? Math.round((paidCount / visibleBookings.length) * 100) : 0;
+
+    const upcomingTrips = useMemo(() => {
+      return [...trips]
+        .sort((a, b) => new Date(a.ngayKhoiHanh || 0).getTime() - new Date(b.ngayKhoiHanh || 0).getTime())
+        .slice(0, 4);
+    }, [trips]);
+
+    const heroMetrics = useMemo(
+      () => [
+        {
+          label: "Tổng vé",
+          value: visibleBookings.length,
+          hint: "Vé đang quản lý",
+          accent: "#60a5fa",
+        },
+        {
+          label: "Doanh thu",
+          value: `${(totalRevenue || 0).toLocaleString()}₫`,
+          hint: "Đã ghi nhận",
+          accent: "#fbbf24",
+        },
+        {
+          label: "Đã thanh toán",
+          value: paidCount,
+          hint: `${unpaidCount} vé chờ xác nhận`,
+          accent: "#34d399",
+        },
+        {
+          label: "Tỉ lệ lấp đầy",
+          value: `${occupancyRate}%`,
+          hint: `${occupiedSeats} ghế / ${totalSeats || 0}`,
+          accent: "#a78bfa",
+        },
+      ],
+      [visibleBookings.length, totalRevenue, paidCount, unpaidCount, occupancyRate, occupiedSeats, totalSeats]
+    );
+
+    const currentTimestamp = useMemo(() => new Date().toLocaleString("vi-VN", { hour12: false }), []);
 
     // ---------------------------
     // --- Seat Manager (top) ---
@@ -117,11 +183,15 @@
     // Vì vậy ta sẽ gọi, kiểm tra và fallback các dạng trả về.
 
     const fetchBookingsOfTripRaw = async (tripId: string) => {
+      if (!partnerId) {
+        return { ok: false, data: [] };
+      }
+
       try {
-        // Lấy tất cả bookings từ state hoặc API
+        // Lấy tất cả bookings từ state hoặc API theo partner
         const allBookings = bookings.length > 0 
           ? bookings 
-          : await getAllBookings();
+          : parseBookingsArrayFromRes(await getBookingsByPartnerId(partnerId));
         
         // Lọc bookings theo tripId
         const bookingsOfTrip = allBookings.filter((b: Booking) => {
@@ -151,16 +221,21 @@
       return;
     }
 
+    if (!partnerId) {
+      alert("⚠️ Vui lòng đăng nhập bằng tài khoản nhà xe để thao tác.");
+      return;
+    }
+
     try {
       setSeatActionLoading(true);
 
       // Reload trips và bookings để có dữ liệu mới nhất
-      await reloadAllData();
+      await reloadAllData(partnerId);
       
       // Fetch lại trip trực tiếp từ API để có bookedSeats mới nhất
       let currentTrip: Trip | null = null;
       try {
-        const allTrips = await getAllTrips();
+        const allTrips = await getAllTrips(partnerId);
         currentTrip = allTrips.find((t: Trip) => t._id === tripId) || null;
         if (!currentTrip) {
           alert("⚠️ Không tìm thấy chuyến xe!");
@@ -279,6 +354,10 @@
     // Đặt vé nhanh
     const handleQuickBook = async () => {
       if (!tripForManage || !quickBookSeat) return;
+      if (!partnerId) {
+        alert("⚠️ Vui lòng đăng nhập bằng tài khoản nhà xe để đặt vé.");
+        return;
+      }
       
       if (!quickBookHoTen.trim()) {
         alert("⚠️ Vui lòng nhập tên khách hàng!");
@@ -327,8 +406,11 @@
             bookingData.userId = userId;
           }
         } catch (userErr) {
-          // Không có userId, có thể backend không bắt buộc cho partner đặt vé
           console.warn("⚠️ Không lấy được userId từ localStorage:", userErr);
+        }
+
+        if (!bookingData.userId) {
+          bookingData.userId = partnerId;
         }
         
         console.log("📤 Đặt vé nhanh:", bookingData);
@@ -460,7 +542,7 @@
       await new Promise(resolve => setTimeout(resolve, 300));
 
       // Reload local data để lấy dữ liệu mới nhất (bao gồm trip.bookedSeats vừa lưu)
-      await reloadAllData();
+      await reloadAllData(partnerId);
       
       // Đợi thêm một chút để state được update
       await new Promise(resolve => setTimeout(resolve, 200));
@@ -474,7 +556,7 @@
       let updatedTrip: Trip | null = null;
       try {
         // Fetch lại trực tiếp từ API (không dùng cache)
-        const allTrips = await getAllTrips();
+        const allTrips = await getAllTrips(partnerId);
         updatedTrip = allTrips.find((t: Trip) => t._id === tripForManage._id) || null;
         if (updatedTrip) {
           console.log("📥 Trip sau khi lưu (chi tiết):", {
@@ -681,31 +763,42 @@
       }
     };
 
-    // reload cả trips + bookings (đồng bộ)
-    const reloadAllData = async () => {
+    // reload cả trips + bookings (đồng bộ) theo partner
+    const reloadAllData = async (scopedPartnerId?: string) => {
+      const targetPartnerId = scopedPartnerId || partnerId;
+
+      if (!targetPartnerId) {
+        setTrips([]);
+        setBookings([]);
+        setLoading(false);
+        return;
+      }
+
       try {
         setLoading(true);
-        const [tripData, bookingData] = await Promise.all([
+        const [tripData, bookingRaw] = await Promise.all([
           (async () => {
             try {
-              return await getAllTrips();
+              return await getAllTrips(targetPartnerId);
             } catch {
-              const res = await axios.get("http://localhost:5000/api/trips");
+              const res = await axios.get("http://localhost:5000/api/trips", {
+                params: { partnerId: targetPartnerId },
+              });
               return res.data;
             }
           })(),
           (async () => {
             try {
-              return await getAllBookings();
+              return await getBookingsByPartnerId(targetPartnerId);
             } catch {
-              const res = await axios.get("http://localhost:5000/api/bookings");
+              const res = await axios.get(`http://localhost:5000/api/bookings/partner/${targetPartnerId}`);
               return res.data;
             }
           })(),
         ]);
 
         setTrips(tripData || []);
-        setBookings(bookingData || []);
+        setBookings(parseBookingsArrayFromRes(bookingRaw));
       } catch (err) {
         console.error("Lỗi reload data:", err);
         alert("⚠️ Có lỗi khi tải lại dữ liệu. Vui lòng refresh trang.");
@@ -744,6 +837,16 @@
         <div style={styles.loadingScreen}>
           <div style={styles.spinner}></div>
           <p style={styles.loadingText}>Đang tải dữ liệu...</p>
+        </div>
+      );
+    }
+
+    if (authChecked && !partnerId) {
+      return (
+        <div style={styles.loadingScreen}>
+          <p style={{ ...styles.loadingText, marginTop: 0 }}>
+            Vui lòng đăng nhập bằng tài khoản nhà xe để xem và quản lý vé của bạn.
+          </p>
         </div>
       );
     }

@@ -23,8 +23,13 @@ export const createNotification = async (data: {
 };
 
 // 🟢 Lấy thông báo cho từng role
-export const getNotificationsByRole = async (role: string) => {
-  const res = await axios.get(`${API_URL}/${role}`);
+export const getNotificationsByRole = async (
+  role: string,
+  params?: { userId?: string }
+) => {
+  const res = await axios.get(`${API_URL}/${role}`, {
+    params,
+  });
   return res.data;
 };
 

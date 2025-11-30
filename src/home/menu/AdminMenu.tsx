@@ -9,7 +9,6 @@ export default function AdminMenu({ activePage, setActivePage }: MenuProps) {
   const menuItems = [
     { id: "dashboard", label: "🏠 Trang chính" },
     { id: "user", label: "👤 Quản lý người dùng" },
-    { id: "partner", label: "🚌 Duyệt nhà xe" },
     { id: "complaint", label: "📨 Khiếu nại" },
     { id: "fee", label: "💰 Phí dịch vụ" },
     { id: "debt", label: "📊 Báo cáo công nợ" },

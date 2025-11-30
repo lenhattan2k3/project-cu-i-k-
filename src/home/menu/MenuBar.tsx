@@ -8,6 +8,7 @@ import {
   FaBell,
   FaUser,
 } from "react-icons/fa";
+import { FiFileText } from "react-icons/fi";
 
 interface MenuBarProps {
   activeTab: string;
@@ -18,8 +19,9 @@ export default function MenuBar({ activeTab, setActiveTab }: MenuBarProps) {
   const menuItems = [
     { id: "search", icon: <FaSearch />, label: "Tìm chuyến" },
     { id: "booking", icon: <FaTicketAlt />, label: "Đặt vé" },
-    { id: "cart", icon: <FaShoppingCart />, label: "Giỏ vé" },
+    { id: "cart", icon: <FaShoppingCart />, label: " Vé" },
     { id: "payment", icon: <FaCreditCard />, label: "Thanh toán" },
+    { id: "invoices", icon: <FiFileText />, label: "Hóa đơn" },
     { id: "promotion", icon: <FaGift />, label: "Khuyến mãi" },
     { id: "review", icon: <FaStar />, label: "Đánh giá" },
     { id: "notification", icon: <FaBell />, label: "Thông báo" },
@@ -48,7 +50,7 @@ export default function MenuBar({ activeTab, setActiveTab }: MenuBarProps) {
       <style>{`
         .menu-container {
           position: relative;
-          height: 90px;
+          height: 120px;
           background: linear-gradient(135deg, #1e40af, #2563eb, #60a5fa);
           box-shadow: 0 10px 25px rgba(0, 0, 0, 0.25);
           overflow: hidden;
@@ -84,7 +86,7 @@ export default function MenuBar({ activeTab, setActiveTab }: MenuBarProps) {
           display: flex;
           justify-content: center;
           align-items: center;
-          gap: 40px;
+          gap: 90px;
           height: 100%;
           color: white;
           z-index: 2;
@@ -106,7 +108,7 @@ export default function MenuBar({ activeTab, setActiveTab }: MenuBarProps) {
         }
 
         .menu-item .icon {
-          font-size: 1.3rem;
+          font-size: 2rem;
           margin-bottom: 3px;
           transition: transform 0.3s ease, color 0.3s ease;
         }

@@ -14,6 +14,7 @@ export interface Message {
   imageUrl?: string;
   createdAt?: string;
   senderId?: string;
+  _id?: string;
 }
 
 export interface Review {
@@ -179,5 +180,23 @@ export const userReply = async (
  // FIXED
   } catch (error) {
     handleError(error, "Lỗi khi user trả lời");
+  }
+};
+
+/* ============================================================
+   10) RECALL MESSAGE
+============================================================ */
+export const recallReviewMessage = async (
+  reviewId: string,
+  messageId: string,
+  userId: string,
+  createdAt?: string
+) => {
+  try {
+    const payload = { messageId, userId, createdAt };
+    const res = await axios.post(`${API_URL}/${reviewId}/recall`, payload);
+    return res.data;
+  } catch (error) {
+    handleError(error, "Lỗi khi thu hồi tin nhắn");
   }
 };

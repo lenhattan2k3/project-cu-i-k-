@@ -4,7 +4,7 @@ import { getBankByUser } from "../../api/bankApi";
 import { useNavigate } from "react-router-dom";
 import { bookTicket } from "../../api/bookingApi";
 import { getPaymentStatus } from "../../api/payment-methodApi";
-import airplane from "../../assets/airplane.jpg";
+import airplane from "../../assets/unnamed.jpg";
 import heroBus from "../../assets/hero-bus.jpg";
 import trainStation from "../../assets/train-station.jpg";
 
@@ -12,6 +12,28 @@ import trainStation from "../../assets/train-station.jpg";
 
 import { getPromotions, applyPromotion } from "../../api/promotionsApi"; // Import thêm
 const CLOUDINARY_BASE_URL = "https://res.cloudinary.com/<your-cloud-name>/image/upload/";
+
+// ✅ MAPPING TÊN NHÀ XE
+const NHA_XE_MAPPING: Record<string, string> = {
+  "yft1Ag1eaRf3uCigXyCJLpmu9R42": "Phúc Yên",
+  "SFbbzut0USTG5F6ZM3COrLXKGS93": "Cúc Tư",
+  "BuPwvEMgfCNEDbz2VNKx5hnpBT52": "Hồng Sơn",
+  "U5XWQ12kL8VnyQ0ovZTvUZLdJov1": "Nhật Tân"
+};
+const getNhaXeName = (id: string) => NHA_XE_MAPPING[id] || id;
+
+type PayosSession = {
+  orderCode: number;
+  amount: number;
+  description?: string;
+  checkoutUrl?: string | null;
+  qrCode?: string | null;
+  accountNumber?: string | null;
+  accountName?: string | null;
+  bankBin?: string | null;
+  shortLink?: string | null;
+  expiredAt?: string | null;
+};
 
 export default function Cart() {
   const [diemDonChiTiet, setDiemDonChiTiet] = useState<string>("");
@@ -39,13 +61,16 @@ const [selectedTab, setSelectedTab] = useState<"pending" | "paid" | "cancelled">
 
   // --- Payment modal states ---
   const [showPaymentForm, setShowPaymentForm] = useState(false);
-  const [paymentMethod, setPaymentMethod] = useState<"card" | "bank" | "cash">("card");
+  const [paymentMethod, setPaymentMethod] = useState<"card" | "bank" | "cash" | "payos">("card");
   const [selectedBank, setSelectedBank] = useState<string>("");
   const [cardNumber, setCardNumber] = useState<string>("");
   const [cardName, setCardName] = useState<string>("");
   const [cardExpiry, setCardExpiry] = useState<string>("");
   const [cardCvv, setCardCvv] = useState<string>("");
   const [payLoading, setPayLoading] = useState(false);
+  const [payosSession, setPayosSession] = useState<PayosSession | null>(null);
+  const [payosGenerating, setPayosGenerating] = useState(false);
+  const [payosError, setPayosError] = useState<string>("");
 
   // --- Bank link states ---
   const [linkedBank, setLinkedBank] = useState<any | null>(null);
@@ -58,6 +83,8 @@ const [selectedTab, setSelectedTab] = useState<"pending" | "paid" | "cancelled">
   const [appliedVoucher, setAppliedVoucher] = useState<any | null>(null);
   const [discountAmount, setDiscountAmount] = useState<number>(0);
   const [finalTotal, setFinalTotal] = useState<number>(0);
+  const [selectedBookingPartnerId, setSelectedBookingPartnerId] = useState<string>("");
+  const [isFoodService, setIsFoodService] = useState(false);
 
   const banks = [
     { id: "vcb", name: "Vietcombank" },
@@ -66,6 +93,37 @@ const [selectedTab, setSelectedTab] = useState<"pending" | "paid" | "cancelled">
     { id: "mb", name: "MB Bank" },
     { id: "tpb", name: "TPBank" },
   ];
+
+  const resetPayosSession = () => {
+    setPayosSession(null);
+    setPayosError("");
+  };
+
+  const copyToClipboard = (value: string, label?: string) => {
+    if (!value) return;
+    if (navigator?.clipboard?.writeText) {
+      navigator.clipboard
+        .writeText(value)
+        .then(() => alert(label ? `${label} đã được sao chép` : "Đã sao chép"))
+        .catch(() => alert("Không thể sao chép nội dung này"));
+      return;
+    }
+
+    const textarea = document.createElement("textarea");
+    textarea.value = value;
+    textarea.style.position = "fixed";
+    textarea.style.opacity = "0";
+    document.body.appendChild(textarea);
+    textarea.select();
+    try {
+      document.execCommand("copy");
+      alert(label ? `${label} đã được sao chép` : "Đã sao chép");
+    } catch {
+      alert("Không thể sao chép nội dung này");
+    } finally {
+      document.body.removeChild(textarea);
+    }
+  };
 
   const [firebaseUid, setFirebaseUid] = useState<string | null>(null);
   const navigate = useNavigate();
@@ -165,7 +223,7 @@ const [selectedTab, setSelectedTab] = useState<"pending" | "paid" | "cancelled">
         prev.map((b) => (b._id === id ? { ...b, status: "cancelled" } : b))
       );
   
-      setSelectedTab("paid");
+      setSelectedTab("cancelled");
       setSelectedTicketId(null);
     } catch (err) {
       console.error(err);
@@ -227,19 +285,26 @@ const [selectedTab, setSelectedTab] = useState<"pending" | "paid" | "cancelled">
   const filteredBookings = bookings.filter((b) => {
     if (selectedTab === "pending") {
       return b.status === "pending" || (!b.status || b.status === "pending");
+    } else if (selectedTab === "paid") {
+      return b.status === "paid";
     } else {
-      // Tab "paid" → HIỂN THỊ: paid + cancelled
-      return b.status === "paid" || b.status === "cancelled";
+      return b.status === "cancelled";
     }
   });
 
   // 🆕 --- Voucher handlers ---
-  const fetchVouchers = async () => {
+  const fetchVouchers = async (partnerId?: string) => {
+    const normalized = partnerId?.trim();
+    if (!normalized) {
+      setVouchers([]);
+      return;
+    }
     try {
-      const data = await getPromotions();
-      setVouchers(data);
+      const data = await getPromotions(normalized);
+      setVouchers(Array.isArray(data) ? data : data.promotions || []);
     } catch (error) {
       console.error("Lỗi khi tải voucher:", error);
+      setVouchers([]);
     }
   };
 
@@ -250,16 +315,29 @@ const [selectedTab, setSelectedTab] = useState<"pending" | "paid" | "cancelled">
     }
 
     if (!selectedBooking) return;
+    const bookingPartnerId =
+      selectedBookingPartnerId ||
+      selectedBooking.partnerId ||
+      selectedBooking.tripId?.partnerId;
+    if (!bookingPartnerId) {
+      alert("Không xác định được nhà xe của vé, vui lòng thử lại sau!");
+      return;
+    }
 
     try {
-      const result = await applyPromotion(voucherCode, selectedBooking.totalPrice);
+      const result = await applyPromotion(
+        voucherCode,
+        selectedBooking.totalPrice,
+        bookingPartnerId
+      );
       
       setAppliedVoucher({
         code: result.code,
         discount: result.discount
       });
       setDiscountAmount(result.discount);
-      setFinalTotal(result.newTotal);
+      setFinalTotal(result.newTotal + (isFoodService ? 50000 : 0));
+      resetPayosSession();
       
       alert(`✅ Áp dụng voucher thành công! Giảm ${result.discount.toLocaleString()}₫`);
       setShowVoucherList(false);
@@ -272,8 +350,9 @@ const [selectedTab, setSelectedTab] = useState<"pending" | "paid" | "cancelled">
   const handleRemoveVoucher = () => {
     setAppliedVoucher(null);
     setDiscountAmount(0);
-    setFinalTotal(selectedBooking?.totalPrice || 0);
+    setFinalTotal((selectedBooking?.totalPrice || 0) + (isFoodService ? 50000 : 0));
     setVoucherCode("");
+    resetPayosSession();
   };
 
   const handleSelectVoucher = (code: string) => {
@@ -284,6 +363,8 @@ const [selectedTab, setSelectedTab] = useState<"pending" | "paid" | "cancelled">
   // --- Payment handlers ---
   const openPaymentModal = async (booking: any) => {
     setSelectedBooking(booking);
+    const bookingPartnerId = booking?.partnerId || booking?.tripId?.partnerId || "";
+    setSelectedBookingPartnerId(bookingPartnerId);
     setShowPaymentForm(true);
 
     // Reset voucher states
@@ -291,6 +372,8 @@ const [selectedTab, setSelectedTab] = useState<"pending" | "paid" | "cancelled">
     setDiscountAmount(0);
     setFinalTotal(booking.totalPrice);
     setVoucherCode("");
+    setIsFoodService(false);
+    resetPayosSession();
 
     setPaymentMethod("card");
     setSelectedBank("");
@@ -302,8 +385,8 @@ const [selectedTab, setSelectedTab] = useState<"pending" | "paid" | "cancelled">
     setIsCheckingBank(true);
     setLinkedBank(null);
 
-    // Load vouchers
-    await fetchVouchers();
+    // Load vouchers của đúng nhà xe
+    await fetchVouchers(bookingPartnerId);
 
     try {
       if (firebaseUid) {
@@ -352,10 +435,101 @@ const [selectedTab, setSelectedTab] = useState<"pending" | "paid" | "cancelled">
     return true;
   };
 
-  const handleConfirmPayment = async (methodOverride?: "card" | "bank" | "cash") => {
+  const handleGeneratePayosSession = async () => {
+    if (!selectedBooking || !firebaseUid) {
+      alert("Vui lòng đăng nhập và chọn vé cần thanh toán.");
+      return;
+    }
+
+    if (!diemDonChiTiet.trim()) {
+      alert("Vui lòng nhập địa chỉ đón chi tiết trước khi tạo mã PayOS!");
+      return;
+    }
+
+    setPayosGenerating(true);
+    setPayosError("");
+    setPayosSession(null);
+
+    try {
+      const orderCode = Number(String(Date.now()).slice(-6));
+      const amount = finalTotal > 0 ? finalTotal : selectedBooking.totalPrice;
+      const description = `Thanh toan ve ${selectedBooking.tripId?.tenChuyen?.slice(0, 20) || "xe"}`;
+      const returnQuery = new URLSearchParams({
+        orderCode: String(orderCode),
+        amount: String(amount),
+      }).toString();
+      const returnUrl = `${window.location.origin}/payment-success?${returnQuery}`;
+      const cancelUrl = `${window.location.origin}/homeuser`;
+
+      // Lưu địa chỉ đón trước để nhà xe nhận được thông tin
+      await fetch(`http://localhost:5000/api/bookings/${selectedBooking._id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ diemDonChiTiet: diemDonChiTiet.trim() }),
+      });
+
+      const res = await fetch("http://localhost:5000/api/payos/create-payment", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId: firebaseUid,
+          bookingId: selectedBooking._id,
+          amount,
+          description,
+          orderCode,
+          returnUrl,
+          cancelUrl,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || "Không thể tạo mã thanh toán PayOS");
+      }
+
+      const info = data.paymentInfo || {};
+      const normalizedOrderCode = Number(info.orderCode || orderCode);
+      const normalizedAmount = Number(info.amount || amount);
+      setPayosSession({
+        orderCode: isNaN(normalizedOrderCode) ? orderCode : normalizedOrderCode,
+        amount: isNaN(normalizedAmount) ? amount : normalizedAmount,
+        description: info.description || description,
+        checkoutUrl: info.checkoutUrl || data.paymentLink || null,
+        qrCode: info.qrCode || null,
+        accountNumber: info.accountNumber || null,
+        accountName: info.accountName || null,
+        bankBin: info.bankBin || null,
+        shortLink: info.shortLink || null,
+        expiredAt: info.expiredAt || null,
+      });
+    } catch (err: any) {
+      console.error("PayOS Error:", err);
+      setPayosError(err?.message || "Lỗi kết nối PayOS");
+    } finally {
+      setPayosGenerating(false);
+    }
+  };
+
+  const handleConfirmPayment = async (methodOverride?: "card" | "bank" | "cash" | "payos") => {
     const method = methodOverride || paymentMethod;
   
     if (!selectedBooking) return;
+
+    // === VALIDATE ĐỊA CHỈ ĐÓN (BẮT BUỘC) ===
+    if (!diemDonChiTiet.trim()) {
+      alert("Vui lòng nhập địa chỉ đón chi tiết!");
+      return;
+    }
+
+    // === PAYOS HANDLING ===
+    if (method === "payos") {
+      if (!payosSession?.checkoutUrl) {
+        alert("Vui lòng tạo mã thanh toán PayOS trước khi xác nhận!");
+        return;
+      }
+      window.location.href = payosSession.checkoutUrl;
+      return;
+    }
   
     // === VALIDATE CARD / BANK ===
     if (method !== "cash" && !linkedBank) {
@@ -364,12 +538,6 @@ const [selectedTab, setSelectedTab] = useState<"pending" | "paid" | "cancelled">
       } else if (method === "bank") {
         if (!validateBank()) return;
       }
-    }
-  
-    // === VALIDATE ĐỊA CHỈ ĐÓN (BẮT BUỘC) ===
-    if (!diemDonChiTiet.trim()) {
-      alert("Vui lòng nhập địa chỉ đón chi tiết!");
-      return;
     }
   
     setPayLoading(true);
@@ -389,9 +557,12 @@ const [selectedTab, setSelectedTab] = useState<"pending" | "paid" | "cancelled">
       };
   
       // Thêm voucher nếu có
-      if (appliedVoucher) {
-        updatePayload.voucherCode = appliedVoucher.code;
-        updatePayload.discountAmount = discountAmount;
+      if (appliedVoucher || isFoodService) {
+        if (appliedVoucher) {
+          updatePayload.voucherCode = appliedVoucher.code;
+          updatePayload.discountAmount = discountAmount;
+        }
+        updatePayload.isFoodService = isFoodService;
         updatePayload.finalTotal = finalTotal;
       }
   
@@ -411,9 +582,12 @@ const [selectedTab, setSelectedTab] = useState<"pending" | "paid" | "cancelled">
                 status: "paid",
                 paymentMethod: finalPaymentMethod,
                 diemDonChiTiet: diemDonChiTiet.trim(),
-                ...(appliedVoucher && {
-                  voucherCode: appliedVoucher.code,
-                  discountAmount: discountAmount,
+                ...((appliedVoucher || isFoodService) && {
+                  ...(appliedVoucher && {
+                    voucherCode: appliedVoucher.code,
+                    discountAmount: discountAmount,
+                  }),
+                  isFoodService: isFoodService,
                   finalTotal: finalTotal,
                 }),
               }
@@ -437,11 +611,13 @@ const [selectedTab, setSelectedTab] = useState<"pending" | "paid" | "cancelled">
   
       // === ĐÓNG MODAL & RESET ===
       setShowPaymentForm(false);
+      setSelectedTab("paid");
       setSelectedBooking(null);
       setLinkedBank(null);
       setAppliedVoucher(null);
       setDiscountAmount(0);
       setFinalTotal(0);
+      setIsFoodService(false);
       setDiemDonChiTiet(""); // RESET ĐỊA CHỈ
   
       // === TẢI LẠI DANH SÁCH VÉ ===
@@ -454,356 +630,640 @@ const [selectedTab, setSelectedTab] = useState<"pending" | "paid" | "cancelled">
     }
   };
   return (
-    <div style={{ position: "relative", minHeight: "100vh", overflow: "hidden" }}>
-      {/* 🌌 Ảnh nền mờ động ở lớp dưới cùng */}
-      <div
-        style={{
-          position: "absolute",
-          inset: 0,
-          zIndex: 0, // lớp nền thấp nhất
-          overflow: "hidden",
-        }}
-      >
-        {[airplane, heroBus, trainStation].map((img, i) => (
-          <div
-            key={i}
-            className={`bg-slide ${i === bgIndex ? "active" : ""}`}
-            style={{
-              backgroundImage: `url(${img})`,
-            }}
-          />
-        ))}
-      </div>
-  
-  
-  
-     {/* 🎨 CSS hiệu ứng nền */}
-
+    <div style={{ position: "relative", minHeight: "100vh", paddingBottom: "40px" }}>
+      
   {/* --- TOÀN BỘ STYLES ĐƯỢC CHUYỂN VÀO ĐÂY --- */}
   <style>{`
-    /* --- Animations (Giữ nguyên) --- */
+    /* --- Animations --- */
     @keyframes fadeIn {
-      from { opacity: 0; transform: translateY(10px); }
+      from { opacity: 0; transform: translateY(20px); }
       to { opacity: 1; transform: translateY(0); }
     }
-    @keyframes scaleIn {
-      from { opacity: 0; transform: scale(0.95); }
-      to { opacity: 1; transform: scale(1); }
+    @keyframes float {
+      0% { transform: translateY(0px); }
+      50% { transform: translateY(-10px); }
+      100% { transform: translateY(0px); }
     }
     @keyframes spin { 
       to { transform: rotate(360deg); } 
     }
-.card-status-badge.cancelled {
-  background: #fee2e2;
-  color: #dc2626;
-  font-weight: 700;
-  border: 1px solid #fca5a5;
-}
-    /* --- Base Button --- */
-    .btn {
-      padding: 10px 16px;
-      border: none;
-      border-radius: 10px;
-      font-weight: 600;
-      font-size: 0.9rem;
-      cursor: pointer;
-      transition: all 0.2s ease;
-      text-align: center;
-    }
-    .btn:hover {
-      opacity: 0.9;
-      transform: translateY(-2px);
-    }
-    
-    /* --- Header --- */
-    .header-main {
-      text-align: center;
-      margin-bottom: 50px;
-      animation: fadeIn 0.6s ease;
-    }
-    .header-title {
-      font-size: 2.5rem;
-      font-weight: 800;
-      background: linear-gradient(135deg,rgb(134, 108, 221), #3b82f6);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      margin-bottom: 10px;
-    }
-    .header-subtitle {
-      color: #64748b;
-      font-size: 1rem;
-    }
-.card-status-badge.cancelled {
-  background: #fee2e2;
-  color: #dc2626;
-  font-weight: 700;
-  border: 1px solid #fca5a5;
-}
-    /* --- Tabs --- */
+
+    /* --- Tabs (Premium Floating Pill Style) --- */
     .tabs-container {
       display: flex;
       justify-content: center;
-      gap: 12px;
-      margin-bottom: 40px;
-      animation: fadeIn 0.8s ease;
+      background: rgba(125, 193, 238, 0.9);
+      backdrop-filter: blur(10px);
+      border-radius: 44px;
+      box-shadow: 0 8px 32px rgba(91, 94, 2, 0.08);
+      padding: 8px;
+      max-width: 1700px;
+      width: 95%;
+      margin: 0px auto 40px;
+      border: 1px solid rgba(255, 255, 255, 0.6);
+      position: sticky;
+      top: 10px;
+      z-index: 100;
     }
     .tab-btn {
-      padding: 12px 28px;
-      border-radius: 12px;
+      flex: 1;
+      padding: 16px 0;
       border: none;
-      background: #ffffff;
+      background: transparent;
       color: #64748b;
-      font-weight: 600;
+      font-weight: 700;
+      font-size: 1.1rem;
       cursor: pointer;
-      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
-      font-size: 0.95rem;
-      transition: all 0.15s ease;
+      position: relative;
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      border-radius: 18px;
+      z-index: 1;
+    }
+    .tab-btn:hover {
+      color: #3b82f6;
+      background: rgba(59, 130, 246, 0.05);
     }
     .tab-btn.active {
-      background: linear-gradient(135deg, #0ea5e9, #3b82f6);
-      color: #fff;
-      box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
-    }
-
-    /* --- Loader & Message --- */
-    .loader-container {
-      text-align: center;
-      font-size: 1.1rem;
-      color: #64748b;
-      animation: fadeIn 0.5s ease;
-    }
-    .loader-spinner {
-      display: inline-block;
-      width: 40px;
-      height: 40px;
-      border: 4px solid #e0f2fe;
-      border-top: 4px solid #3b82f6;
-      border-radius: 50%;
-      animation: spin 1s linear infinite;
-    }
-    .message {
-      text-align: center;
-      font-size: 1.1rem;
-      color: #64748b;
-      animation: fadeIn 0.5s ease;
-    }
-   /* --- Booking Card Grid --- */
-    .cards-grid {
-      display: grid;
-      gap: 32px;
-      grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
-      max-width: 1400px;
-      margin: 0 auto;
-      padding: 0 20px;
-    }
-
-    /* --- Booking Card --- */
-    .booking-card {
+      color: #2563eb;
       background: #ffffff;
-      border-radius: 20px;
+      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
+      transform: scale(1.02);
+    }
+    /* Remove old underline */
+    .tab-btn.active::after {
+      display: none;
+    }
+
+    /* --- Empty State --- */
+    .empty-state {
+      text-align: center;
+      padding: 100px 20px;
+      animation: fadeIn 0.6s ease;
+    }
+    .empty-bus-icon {
+      width: 350px;
+      height: auto;
+      margin-bottom: 30px;
+      opacity: 0.9;
+      animation: float 6s ease-in-out infinite; /* Floating animation */
+      filter: drop-shadow(0 20px 30px rgba(59, 130, 246, 0.15));
+    }
+    .empty-text {
+      color: #94a3b8;
+      font-size: 1.5rem;
+      font-weight: 600;
+      letter-spacing: -0.5px;
+    }
+
+    /* --- Booking Card Grid --- */
+    .cards-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      max-width: 1600px;
+      width: 95%;
+      margin: 0 auto;
+      padding: 0 16px 60px;
+    }
+
+    /* --- Ticket Card (Compact & Clean Style like reference) --- */
+    .booking-card {
+      display: flex;
+      flex-direction: row;
+      background: #ffffff;
+      border-radius: 16px;
       overflow: hidden;
       cursor: pointer;
-      /* Box-shadow xanh đẹp hơn */
-      box-shadow: 0 8px 25px -10px rgba(59, 130, 246, 0.2);
-      animation: fadeIn 0.5s ease both;
-      transition: transform 0.2s ease, box-shadow 0.2s ease;
+      box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+      border: 1px solid #e5e7eb;
+      transition: all 0.3s ease;
+      position: relative;
+      animation: fadeIn 0.4s ease;
     }
     .booking-card:hover {
-      transform: translateY(-5px);
-      box-shadow: 0 12px 30px -10px rgba(59, 130, 246, 0.3);
+      transform: translateY(-4px);
+      box-shadow: 0 12px 28px rgba(0, 0, 0, 0.12);
+      border-color: #d1d5db;
     }
 
+    /* Image Area (Left) */
     .card-image-wrapper {
+      width: 200px;
+      min-width: 200px;
       height: 180px;
-      overflow: hidden;
       position: relative;
+      overflow: hidden;
+      flex-shrink: 0;
     }
     .card-image {
       width: 100%;
       height: 100%;
       object-fit: cover;
-      transition: transform 0.3s ease;
+      transition: transform 0.5s ease;
     }
     .booking-card:hover .card-image {
-      transform: scale(1.05);
+      transform: scale(1.08);
     }
+
+    /* Status Badge (Top Left Corner) */
     .card-status-badge {
       position: absolute;
       top: 12px;
-      right: 12px;
-      background: rgba(255, 255, 255, 0.95);
-      padding: 6px 12px;
+      left: 0;
+      padding: 6px 12px 6px 10px;
+      border-radius: 0 20px 20px 0;
+      font-size: 0.7rem;
+      font-weight: 700;
+      z-index: 2;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    }
+    .card-status-badge.paid { 
+      background: linear-gradient(135deg, #10b981, #059669); 
+      color: white; 
+    }
+    .card-status-badge.pending { 
+      background: linear-gradient(135deg, #f59e0b, #d97706); 
+      color: white; 
+    }
+    .card-status-badge.cancelled { 
+      background: linear-gradient(135deg, #ef4444, #dc2626); 
+      color: white; 
+    }
+    .card-status-badge::before {
+      content: "→";
+      font-size: 0.8rem;
+    }
+
+    /* Content Area (Right) */
+    .card-content {
+      flex: 1;
+      padding: 16px 20px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      min-width: 0;
+    }
+    
+    /* Header: NhaXe Name + Rating */
+    .card-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      margin-bottom: 8px;
+    }
+    .card-nhaxe-info {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .card-nhaxe-type {
+      font-size: 0.7rem;
+      color: #9ca3af;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .card-nhaxe-name {
+      font-size: 1.25rem;
+      font-weight: 700;
+      color: #1f2937;
+      margin: 0;
+    }
+    .card-rating {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      background: #fef3c7;
+      padding: 4px 10px;
       border-radius: 20px;
       font-size: 0.85rem;
-      font-weight: 700; /* Đậm hơn */
-      min-width: 80px;
-      text-align: center;
-      backdrop-filter: blur(4px); /* Thêm blur nhẹ */
-      border: 1px solid rgba(255, 255, 255, 0.5);
+      font-weight: 600;
+      color: #d97706;
     }
-    .card-status-badge.paid {
-      color: #10b981;
-    }
-    .card-status-badge.pending {
+    .card-rating::before {
+      content: "★";
       color: #f59e0b;
     }
 
-    .card-content {
-      padding: 20px;
+    /* Info Tags Row */
+    .card-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 12px;
     }
-    .card-title {
-      margin: 0 0 16px; /* Thêm space */
-      font-size: 1.2rem; /* To hơn 1 chút */
+    .card-tag {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 4px 10px;
+      background: #f3f4f6;
+      border-radius: 6px;
+      font-size: 0.75rem;
+      color: #4b5563;
+      font-weight: 500;
+    }
+    .card-tag.date {
+      background: #dbeafe;
+      color: #2563eb;
+    }
+    .card-tag.seat {
+      background: #fce7f3;
+      color: #db2777;
+    }
+    .card-tag.price {
+      background: #d1fae5;
+      color: #059669;
       font-weight: 700;
-      color: #1e293b;
-      line-height: 1.4;
     }
-    .card-info-list {
+
+    /* Route Timeline */
+    .card-route {
+      display: flex;
+      align-items: stretch;
+      gap: 12px;
+      margin-bottom: 12px;
+      padding: 14px 16px;
+      background: #f8fafc;
+      border-radius: 12px;
+      border: 1px solid #e5e7eb;
+    }
+    .route-time {
       display: flex;
       flex-direction: column;
-      gap: 10px; /* Tăng gap */
-      color: #64748b;
-      font-size: 0.9rem;
+      justify-content: space-between;
+      align-items: flex-start;
+      min-width: 55px;
     }
-    .card-info-item {
+    .time-depart {
+      font-size: 1.3rem;
+      font-weight: 800;
+      color: #1f2937;
+      line-height: 1;
+    }
+    .time-arrive {
+      font-size: 1.1rem;
+      font-weight: 700;
+      color: #6b7280;
+      line-height: 1;
+    }
+    .route-line {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 2px 0;
+    }
+    .route-dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: #3b82f6;
+      border: 3px solid #dbeafe;
+      box-shadow: 0 0 0 2px #3b82f6;
+    }
+    .route-dot.end {
+      background: #ef4444;
+      border-color: #fee2e2;
+      box-shadow: 0 0 0 2px #ef4444;
+    }
+    .route-connector {
+      width: 2px;
+      flex: 1;
+      background: linear-gradient(to bottom, #3b82f6, #ef4444);
+      margin: 6px 0;
+      min-height: 28px;
+    }
+    .route-info {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+    .route-point {
+      display: flex;
+      flex-direction: column;
+    }
+    .route-city {
+      font-size: 1rem;
+      font-weight: 700;
+      color: #1f2937;
+    }
+    .route-duration {
+      font-size: 0.8rem;
+      color: #6b7280;
+      background: #e5e7eb;
+      padding: 4px 10px;
+      border-radius: 20px;
+      display: inline-block;
+      margin: 6px 0;
+      width: fit-content;
+    }
+
+    /* Amenities */
+    .card-amenities {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    .amenity-item {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 0.75rem;
+      color: #10b981;
+      font-weight: 500;
+    }
+    .amenity-item::before {
+      content: "✓";
+      font-weight: 700;
+    }
+
+    /* Voucher Badge */
+    .card-voucher {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      background: linear-gradient(135deg, #fef3c7, #fde68a);
+      padding: 4px 10px;
+      border-radius: 6px;
+      font-size: 0.75rem;
+      color: #b45309;
+      font-weight: 600;
+      margin-top: 8px;
+    }
+
+    /* Actions */
+    .card-actions-wrapper {
+      display: flex;
+      gap: 8px;
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px dashed #e5e7eb;
+      flex-wrap: wrap;
+    }
+
+    .action-btn {
+      padding: 8px 16px;
+      border-radius: 8px;
+      border: none;
+      font-weight: 600;
+      font-size: 0.85rem;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .action-btn:active {
+      transform: scale(0.96);
+    }
+    .btn-primary {
+      background: linear-gradient(135deg, #3b82f6, #2563eb);
+      color: white;
+      box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
+    }
+    .btn-primary:hover {
+      box-shadow: 0 6px 16px rgba(37, 99, 235, 0.4);
+      transform: translateY(-1px);
+    }
+    .btn-secondary {
+      background: #f3f4f6;
+      color: #4b5563;
+      border: 1px solid #e5e7eb;
+    }
+    .btn-secondary:hover {
+      background: #e5e7eb;
+      color: #1f2937;
+    }
+    .btn-danger {
+      background: #fee2e2;
+      color: #dc2626;
+    }
+    .btn-danger:hover {
+      background: #fecaca;
+    }
+    .btn-success {
+      background: linear-gradient(135deg, #10b981, #059669);
+      color: white;
+      box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+    }
+    .btn-success:hover {
+      box-shadow: 0 6px 16px rgba(16, 185, 129, 0.4);
+      transform: translateY(-1px);
+    }
+
+    /* Responsive */
+    @media (max-width: 640px) {
+      .booking-card {
+        flex-direction: column;
+      }
+      .card-image-wrapper {
+        width: 100%;
+        height: 140px;
+        min-width: unset;
+      }
+      .card-content {
+        padding: 14px;
+      }
+      .card-tags {
+        gap: 6px;
+      }
+      .card-route {
+        gap: 12px;
+      }
+      .time-depart {
+        font-size: 1.2rem;
+      }
+      .card-actions-wrapper {
+        flex-direction: column;
+      }
+      .action-btn {
+        justify-content: center;
+        width: 100%;
+      }
+    }
+
+    /* Legacy info styles (keeping for compatibility) */
+    .card-title {
+      display: none;
+    }
+    .card-info-grid {
+      display: none;
+    }
+    .info-box {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding: 12px;
+      border-radius: 16px;
+      transition: background 0.2s;
+    }
+    .info-label {
+      font-size: 0.8rem;
+      color: #94a3b8;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .info-value {
+      font-size: 1.1rem;
+      color: #334155;
+      font-weight: 700;
+    }
+    .info-value.price {
+      color: #0ea5e9;
+      font-size: 1.5rem;
+      font-weight: 800;
+    }
+
+    /* Actions Area */
+    .card-actions-wrapper {
+      margin-top: auto;
+      padding-top: 24px;
+      border-top: 1px dashed #e2e8f0;
+      display: flex;
+      gap: 16px;
+      justify-content: flex-end;
+    }
+
+    .action-btn {
+      padding: 12px 24px;
+      border-radius: 14px;
+      border: none;
+      font-weight: 700;
+      font-size: 1rem;
+      cursor: pointer;
+      transition: all 0.2s;
       display: flex;
       align-items: center;
       gap: 8px;
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
     }
-    .card-price {
-      color: #0ea5e9;
-      font-weight: 700;
-      font-size: 1.1rem; /* To hơn */
+    .action-btn:active {
+      transform: scale(0.95);
     }
-    .card-voucher {
-      color: #10b981;
-      font-weight: 600;
+    .btn-primary {
+      background: linear-gradient(135deg, #3b82f6, #2563eb);
+      color: white;
+      box-shadow: 0 10px 20px -5px rgba(37, 99, 235, 0.4);
+    }
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 15px 30px -5px rgba(37, 99, 235, 0.5);
+    }
+    .btn-secondary {
+      background: #ffffff;
+      color: #475569;
+      border: 1px solid #e2e8f0;
+    }
+    .btn-secondary:hover {
+      background: #f8fafc;
+      border-color: #cbd5e1;
+      color: #1e293b;
+    }
+    .btn-danger {
+      background: #fee2e2;
+      color: #dc2626;
+      border: 1px solid #fecaca;
+    }
+    .btn-danger:hover {
+      background: #fecaca;
+      color: #b91c1c;
+      box-shadow: 0 10px 20px -5px rgba(220, 38, 38, 0.2);
     }
 
-    .card-actions {
-      margin-top: 20px; /* Tăng space */
-      display: grid; /* Dùng grid cho đều */
-      grid-template-columns: 1fr 1fr 1fr;
-      gap: 8px;
-    }
-    /* Style riêng cho nút Chi Tiết */
-    .btn-detail {
-      grid-column: 1 / -1; /* Nút Chi Tiết rộng full */
-      background: linear-gradient(135deg, #0ea5e9, #3b82f6);
-      color: #fff;
-    }
-    .btn-pay {
-      background: linear-gradient(135deg, #10b981, #059669);
-      color: #fff;
-    }
-    .btn-edit {
-      background: linear-gradient(135deg, #f59e0b, #d97706);
-      color: #fff;
-    }
-    .btn-cancel {
-      background: linear-gradient(135deg, #ef4444, #dc2626);
-      color: #fff;
-    }
-
-    /* --- Modal --- */
+    /* --- Modal Styles (Keep existing but clean up) --- */
     .modal-overlay {
       position: fixed;
       inset: 0;
-      background: rgba(15, 23, 42, 0.55);
+      background: rgba(15, 23, 42, 0.4);
       display: flex;
       justify-content: center;
       align-items: center;
-      z-index: 50;
-      backdrop-filter: blur(8px); /* HIỆU ỨNG WOW */
-      animation: fadeIn 0.2s ease;
+      z-index: 200;
+      backdrop-filter: blur(8px);
     }
     .modal-content {
-      animation: scaleIn 0.2s ease;
       background: #ffffff;
       border-radius: 24px;
       width: 90%;
-      box-shadow: 0 30px 80px rgba(0, 0, 0, 0.22);
-      border: 1px solid rgba(226, 232, 240, 0.5);
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+      border: 1px solid rgba(255,255,255,0.5);
     }
+    /* ... (Other modal styles can remain similar or be simplified) ... */
     .modal-close-btn {
-      margin-top: 24px;
+      margin-top: 20px;
       width: 100%;
-      padding: 14px;
-      border-radius: 12px;
+      padding: 12px;
+      border-radius: 8px;
       background: #f1f5f9;
       color: #64748b;
       border: none;
       font-weight: 600;
-      font-size: 1rem;
       cursor: pointer;
-      transition: background 0.2s ease;
     }
-    .modal-close-btn:hover {
-      background: #e2e8f0;
-    }
-
+    
     /* --- Update Seat Modal --- */
     .modal-content-update {
-      padding: 32px;
-      max-width: 460px;
+      padding: 24px;
+      max-width: 480px;
     }
     .modal-title-update {
-      margin: 0 0 24px;
-      font-size: 1.55rem;
-      font-weight: 800;
+      margin: 0 0 20px;
+      font-size: 1.4rem;
+      font-weight: 700;
       color: #0f172a;
-      letter-spacing: -0.3px;
     }
     .seat-grid {
       display: grid;
       grid-template-columns: repeat(5, 1fr);
-      gap: 10px;
-      margin-bottom: 24px;
+      gap: 8px;
+      margin-bottom: 20px;
     }
     .seat-btn {
       aspect-ratio: 1;
       background: #ffffff;
-      border: 2px solid #e2e8f0;
-      border-radius: 14px;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
       display: flex;
       justify-content: center;
       align-items: center;
       cursor: pointer;
       color: #475569;
-      font-weight: 700;
-      font-size: 0.82rem;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
-      transition: all 0.2s ease;
+      font-weight: 600;
+      font-size: 0.85rem;
     }
     .seat-btn:hover:not(.booked) {
       border-color: #3b82f6;
+      color: #3b82f6;
     }
     .seat-btn.booked {
       background: #e2e8f0;
+      border-color: #e2e8f0;
       cursor: not-allowed;
       color: #94a3b8;
     }
     .seat-btn.selected {
-      background: linear-gradient(135deg, #0ea5e9, #3b82f6);
-      border: none;
+      background: #3b82f6;
+      border-color: #3b82f6;
       color: #fff;
-      box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.3);
     }
 
     .update-total-price {
-      padding: 18px;
-      background: linear-gradient(135deg, #f0f9ff, #e0f2fe);
-      border-radius: 16px;
-      margin-bottom: 24px;
+      padding: 16px;
+      background: #f8fafc;
+      border-radius: 12px;
+      margin-bottom: 20px;
       text-align: center;
-      border: 1px dashed #0ea5e9;
+      border: 1px solid #e2e8f0;
     }
     .update-total-price p {
       margin: 0;
       color: #0ea5e9;
-      font-weight: 800;
-      font-size: 1.2rem;
-      letter-spacing: -0.3px;
+      font-weight: 700;
+      font-size: 1.1rem;
     }
     .modal-actions {
       display: flex;
@@ -811,53 +1271,53 @@ const [selectedTab, setSelectedTab] = useState<"pending" | "paid" | "cancelled">
     }
     .btn-update-confirm {
       flex: 1;
-      padding: 15px;
-      border-radius: 14px;
-      background: linear-gradient(135deg, #0ea5e9, #3b82f6);
+      padding: 12px;
+      border-radius: 8px;
+      background: #3b82f6;
       color: #fff;
-      font-weight: 700;
-      font-size: 1rem;
-      box-shadow: 0 8px 20px rgba(14, 165, 233, 0.3);
+      font-weight: 600;
+      border: none;
+      cursor: pointer;
     }
     .btn-update-cancel {
       flex: 1;
-      padding: 15px;
-      border-radius: 14px;
-      background: #f8fafc;
+      padding: 12px;
+      border-radius: 8px;
+      background: #f1f5f9;
       color: #64748b;
       border: 1px solid #e2e8f0;
       font-weight: 600;
-      font-size: 1rem;
+      cursor: pointer;
     }
 
-    /* --- WOW: Detail Ticket Modal --- */
+    /* --- Detail Ticket Modal --- */
     .modal-content-detail {
-      max-width: 420px;
-      padding: 0; /* Xóa padding để ảnh tràn viền */
-      overflow: hidden; /* Ẩn phần thừa */
+      max-width: 400px;
+      padding: 0; 
+      overflow: hidden; 
     }
     .ticket-header {
-      padding: 24px 24px 20px;
+      padding: 20px 20px 16px;
     }
     .ticket-title {
-      margin: 0 0 16px;
-      font-size: 1.5rem;
+      margin: 0 0 12px;
+      font-size: 1.4rem;
       font-weight: 700;
       color: #1e293b;
     }
     .ticket-image {
       width: 100%;
-      height: 200px;
+      height: 180px;
       object-fit: cover;
-      border-radius: 16px;
+      border-radius: 12px;
     }
     .ticket-body {
-      padding: 24px;
+      padding: 20px;
       display: flex;
       flex-direction: column;
-      gap: 14px;
+      gap: 12px;
       color: #64748b;
-      font-size: 0.95rem;
+      font-size: 0.9rem;
     }
     .ticket-info-row {
       display: flex;
@@ -869,8 +1329,8 @@ const [selectedTab, setSelectedTab] = useState<"pending" | "paid" | "cancelled">
       align-items: center;
       gap: 10px;
       padding: 12px;
-      background: #f0f9ff;
-      border-radius: 10px;
+      background: #f8fafc;
+      border-radius: 8px;
       margin-top: 8px;
     }
     .ticket-total-price {
@@ -882,8 +1342,8 @@ const [selectedTab, setSelectedTab] = useState<"pending" | "paid" | "cancelled">
     .ticket-rip {
       height: 20px;
       background: 
-        radial-gradient(circle at 0 10px, transparent 0, transparent 5px, #f0f9ff 5px) 0 0 / 15px 20px repeat-x,
-        radial-gradient(circle at 100% 10px, #f0f9ff 0, #f0f9ff 5px, transparent 5px) 100% 0 / 15px 20px repeat-x;
+        radial-gradient(circle at 0 10px, transparent 0, transparent 5px, #f8fafc 5px) 0 0 / 15px 20px repeat-x,
+        radial-gradient(circle at 100% 10px, #f8fafc 0, #f8fafc 5px, transparent 5px) 100% 0 / 15px 20px repeat-x;
       position: relative;
     }
     .ticket-rip::before {
@@ -893,29 +1353,29 @@ const [selectedTab, setSelectedTab] = useState<"pending" | "paid" | "cancelled">
       left: 10px;
       right: 10px;
       height: 1px;
-      border-top: 2px dashed #d1e9fa;
+      border-top: 2px dashed #cbd5e1;
       transform: translateY(-50%);
     }
 
     /* Cuống vé với QR */
     .ticket-stub {
-      background: #f0f9ff;
-      padding: 20px 24px;
+      background: #f8fafc;
+      padding: 20px;
       display: flex;
       align-items: center;
-      gap: 20px;
+      gap: 16px;
     }
     .ticket-qr-placeholder {
-      width: 80px;
-      height: 80px;
+      width: 60px;
+      height: 60px;
       background: #fff;
-      border: 2px solid #e0f2fe;
-      border-radius: 8px;
+      border: 1px solid #e2e8f0;
+      border-radius: 6px;
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 2rem;
-      color: #e0f2fe;
+      font-size: 1.5rem;
+      color: #cbd5e1;
       flex-shrink: 0;
     }
     .ticket-stub-info p {
@@ -929,36 +1389,36 @@ const [selectedTab, setSelectedTab] = useState<"pending" | "paid" | "cancelled">
       color: #64748b;
     }
     .ticket-close-btn-wrapper {
-      padding: 24px;
-      background: #f0f9ff;
+      padding: 20px;
+      background: #f8fafc;
     }
 
   `}</style>
   
    {/* 💡 Toàn bộ nội dung nổi lên trên */}
    <div style={{ position: "relative", zIndex: 2 }}>
-      {/* --- Header --- */}
-      <div className="header-main">
-        <h1 className="header-title">🎫 Vé Của Bạn</h1>
-        <p className="header-subtitle">Quản lý đặt vé của bạn</p>
-      </div>
-
+      
       {/* --- Tabs --- */}
       <div className="tabs-container">
-  {["pending", "paid", "cancelled"].map((tab) => (
-    <button
-      key={tab}
-      onClick={() => setSelectedTab(tab as "pending" | "paid" | "cancelled")}
-      className={`tab-btn ${selectedTab === tab ? "active" : ""}`}
-    >
-      {tab === "pending"
-        ? "⏳ Chờ Thanh Toán"
-        : tab === "paid"
-        ? "✅ Đã Thanh Toán / Hủy"
-        : " ☄️"}
-    </button>
-  ))}
-</div>
+        <button
+          onClick={() => setSelectedTab("pending")}
+          className={`tab-btn ${selectedTab === "pending" ? "active" : ""}`}
+        >
+          Hiện tại
+        </button>
+        <button
+          onClick={() => setSelectedTab("paid")}
+          className={`tab-btn ${selectedTab === "paid" ? "active" : ""}`}
+        >
+          Đã đi
+        </button>
+        <button
+          onClick={() => setSelectedTab("cancelled")}
+          className={`tab-btn ${selectedTab === "cancelled" ? "active" : ""}`}
+        >
+          Đã hủy
+        </button>
+      </div>
 
 
       {/* --- Loader --- */}
@@ -971,6 +1431,30 @@ const [selectedTab, setSelectedTab] = useState<"pending" | "paid" | "cancelled">
       {/* --- Message --- */}
       {message && !loading && <p className="message">{message}</p>}
 
+      {/* --- Empty State (Bus Illustration) --- */}
+      {!loading && filteredBookings.length === 0 && (
+        <div className="empty-state">
+          {/* Simple SVG Bus Illustration */}
+          <svg className="empty-bus-icon" viewBox="0 0 200 150" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M40 110H160V60C160 48.9543 151.046 40 140 40H60C48.9543 40 40 48.9543 40 60V110Z" fill="#3b82f6"/>
+            <rect x="50" y="55" width="30" height="25" rx="2" fill="#93c5fd"/>
+            <rect x="85" y="55" width="30" height="25" rx="2" fill="#93c5fd"/>
+            <rect x="120" y="55" width="30" height="25" rx="2" fill="#93c5fd"/>
+            <circle cx="60" cy="110" r="12" fill="#334155"/>
+            <circle cx="140" cy="110" r="12" fill="#334155"/>
+            <circle cx="60" cy="110" r="5" fill="#94a3b8"/>
+            <circle cx="140" cy="110" r="5" fill="#94a3b8"/>
+            <path d="M160 110H165C167.761 110 170 107.761 170 105V90" stroke="#3b82f6" strokeWidth="4" strokeLinecap="round"/>
+            <path d="M30 110H170" stroke="#e2e8f0" strokeWidth="4" strokeLinecap="round"/>
+            {/* City Background Hint */}
+            <path d="M10 110V80H30V110" fill="#e2e8f0"/>
+            <path d="M170 110V70H190V110" fill="#e2e8f0"/>
+            <path d="M130 40V20H150V40" fill="#f1f5f9"/>
+          </svg>
+          <p className="empty-text">Chưa có vé nào trong mục này</p>
+        </div>
+      )}
+
       {/* --- Booking Cards --- */}
       <div className="cards-grid">
         {filteredBookings.map((b, idx) => (
@@ -980,6 +1464,7 @@ const [selectedTab, setSelectedTab] = useState<"pending" | "paid" | "cancelled">
             style={{ animationDelay: `${idx * 0.1}s` }}
             onClick={() => toggleTicket(b._id)}
           >
+            {/* Image Section */}
             <div className="card-image-wrapper">
               <img
                 src={getImageUrl(b.tripId?.hinhAnh)}
@@ -996,99 +1481,129 @@ const [selectedTab, setSelectedTab] = useState<"pending" | "paid" | "cancelled">
                 }`}
               >
                 {b.status === "paid"
-                  ? "Đã TT"
+                  ? "Đã thanh toán"
                   : b.status === "cancelled"
                   ? "Đã hủy"
-                  : timers[b._id] || "02:00:00"}
+                  : timers[b._id] || "Chờ thanh toán"}
               </div>
             </div>
 
+            {/* Content Section */}
             <div className="card-content">
-              <h3 className="card-title">{b.tripId?.tenChuyen}</h3>
-
-              <div className="card-info-list">
-                <div className="card-info-item">
-                  <span>💺</span>
-                  <span>
-                    Ghế: <strong>{b.soGhe.join(", ")}</strong>
-                  </span>
+              {/* Header: NhaXe + Rating */}
+              <div className="card-header">
+                <div className="card-nhaxe-info">
+                  <span className="card-nhaxe-type">{b.tripId?.loaiXe || "Xe khách"}</span>
+                  <h3 className="card-nhaxe-name">{b.tripId?.tenNhaXe || "Nhà xe"}</h3>
                 </div>
-                <div className="card-info-item">
-                  <span>💰</span>
-                  <span className="card-price">
-                    {b.totalPrice.toLocaleString()}₫
-                  </span>
+                <div className="card-rating">
+                  {b.tripId?.rating || "4.5"}
                 </div>
-                {b.voucherCode && (
-                  <div className="card-info-item">
-                    <span>🎟️</span>
-                    <span className="card-voucher">
-                      Voucher: {b.voucherCode} (-{b.discountAmount?.toLocaleString()}₫)
-                    </span>
-                  </div>
-                )}
               </div>
 
+              {/* Info Tags */}
+              <div className="card-tags">
+                <span className="card-tag">{b.tripId?.loaiGhe || "Giường nằm"}</span>
+                <span className="card-tag date">📅 {b.tripId?.ngayKhoiHanh || "N/A"}</span>
+                <span className="card-tag seat">🪑 Ghế: {b.soGhe.join(", ")}</span>
+                <span className="card-tag price">💰 {b.totalPrice?.toLocaleString()}₫</span>
+              </div>
+
+              {/* Route Timeline */}
+              <div className="card-route">
+                <div className="route-time">
+                  <span className="time-depart">{b.tripId?.gioKhoiHanh || "--:--"}</span>
+                  <span className="time-arrive">{b.tripId?.gioDuKienDen || "--:--"}</span>
+                </div>
+                <div className="route-line">
+                  <div className="route-dot"></div>
+                  <div className="route-connector"></div>
+                  <div className="route-dot end"></div>
+                </div>
+                <div className="route-info">
+                  <div className="route-point">
+                    <span className="route-city">{b.tripId?.diemDi || "Điểm đi"}</span>
+                  </div>
+                  <span className="route-duration">~ {b.tripId?.thoiGianDiChuyen || "5h 30m"} • {b.tripId?.loaiDuong || "Đường cao tốc"}</span>
+                  <div className="route-point">
+                    <span className="route-city">{b.tripId?.diemDen || "Điểm đến"}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Amenities */}
+              <div className="card-amenities">
+                {(b.tripId?.tienIch || ["Wifi", "Nước uống", "Điều hòa"]).slice(0, 4).map((item: string, i: number) => (
+                  <span key={i} className="amenity-item">{item}</span>
+                ))}
+              </div>
+
+              {/* Voucher if applied */}
+              {b.voucherCode && (
+                <div className="card-voucher">
+                  🎫 {b.voucherCode} (-{b.discountAmount?.toLocaleString()}₫)
+                </div>
+              )}
+
+              {/* Actions (expanded) */}
               {selectedTicketId === b._id && (
-                <div className="card-actions">
+                <div className="card-actions-wrapper">
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
                       setSelectedBooking(b);
                       setShowDetail(true);
                     }}
-                    className="btn btn-detail"
+                    className="action-btn btn-primary"
                   >
-                    🔍 Chi Tiết
+                    🔍 Chi tiết
                   </button>
 
                   {selectedTab === "pending" && b.status !== "cancelled" && (
-  <>
-    <button
-      onClick={(e) => {
-        e.stopPropagation();
-        openPaymentModal(b);
-      }}
-      className="btn btn-pay"
-    >
-      💳 TT
-    </button>
-    <button
-      onClick={(e) => {
-        e.stopPropagation();
-        handleOpenUpdateForm(b);
-      }}
-      className="btn btn-edit"
-    >
-      ✏️ Sửa
-    </button>
-    <button
-      onClick={(e) => {
-        e.stopPropagation();
-        handleCancel(b._id);
-      }}
-      className="btn btn-cancel"
-    >
-      ❌ Hủy vé
-    </button>
-  </>
-)}
+                    <>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openPaymentModal(b);
+                        }}
+                        className="action-btn btn-success"
+                      >
+                        💳 Thanh toán
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleOpenUpdateForm(b);
+                        }}
+                        className="action-btn btn-secondary"
+                      >
+                        ✏️ Đổi ghế
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleCancel(b._id);
+                        }}
+                        className="action-btn btn-danger"
+                      >
+                        ❌ Hủy vé
+                      </button>
+                    </>
+                  )}
 
-{/* Hiển thị riêng nút Hủy cho tab Đã thanh toán */}
-{selectedTab === "paid" && b.status === "paid" && (
-  <button
-    onClick={(e) => {
-      e.stopPropagation();
-      if (window.confirm("Hủy vé ĐÃ THANH TOÁN?")) {
-        handleCancel(b._id);
-      }
-    }}
-    className="btn btn-cancel"
-  >
-    ❌ Hủy vé
-  </button>
-)}
-
+                  {selectedTab === "paid" && b.status === "paid" && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (window.confirm("Hủy vé ĐÃ THANH TOÁN?")) {
+                          handleCancel(b._id);
+                        }
+                      }}
+                      className="action-btn btn-danger"
+                    >
+                      ❌ Yêu cầu hoàn vé
+                    </button>
+                  )}
                 </div>
               )}
             </div>
@@ -1420,7 +1935,7 @@ const [selectedTab, setSelectedTab] = useState<"pending" | "paid" | "cancelled">
           <div className="ticket-info-row">
             <span>🚌</span>
             <span>
-              <strong>Nhà xe:</strong> {selectedBooking.tripId?.nhaXe || 'Không rõ'}
+              <strong>Nhà xe:</strong> {getNhaXeName(selectedBooking.tripId?.nhaXe || "") || 'Không rõ'}
             </span>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
@@ -1506,6 +2021,7 @@ const [selectedTab, setSelectedTab] = useState<"pending" | "paid" | "cancelled">
             setShowPaymentForm(false);
             setLinkedBank(null);
             setAppliedVoucher(null);
+            resetPayosSession();
           }}
         >
           <div
@@ -1543,21 +2059,20 @@ const [selectedTab, setSelectedTab] = useState<"pending" | "paid" | "cancelled">
               </p>
               
               {appliedVoucher && (
-                <>
-                  <p style={{ margin: "4px 0", color: "#10b981", fontWeight: "600" }}>
-                    🎟️ Voucher: {appliedVoucher.code} (-{discountAmount.toLocaleString()}₫)
-                  </p>
-                  <p style={{ margin: "8px 0 0", color: "#0ea5e9", fontWeight: "700", fontSize: "1.15rem" }}>
-                    Tổng thanh toán: {finalTotal.toLocaleString()}₫
-                  </p>
-                </>
-              )}
-              
-              {!appliedVoucher && (
-                <p style={{ margin: "8px 0 0", color: "#0ea5e9", fontWeight: "700", fontSize: "1.15rem" }}>
-                  Tổng thanh toán: {selectedBooking.totalPrice.toLocaleString()}₫
+                <p style={{ margin: "4px 0", color: "#10b981", fontWeight: "600" }}>
+                  🎟️ Voucher: {appliedVoucher.code} (-{discountAmount.toLocaleString()}₫)
                 </p>
               )}
+
+              {isFoodService && (
+                 <p style={{ margin: "4px 0", color: "#f97316", fontWeight: "600" }}>
+                    🍱 Dịch vụ ăn uống (+50.000₫)
+                 </p>
+              )}
+              
+              <p style={{ margin: "8px 0 0", color: "#0ea5e9", fontWeight: "700", fontSize: "1.15rem" }}>
+                Tổng thanh toán: {finalTotal.toLocaleString()}₫
+              </p>
             </div>
 
             {/* 🆕 Voucher Section */}
@@ -1695,7 +2210,12 @@ const [selectedTab, setSelectedTab] = useState<"pending" | "paid" | "cancelled">
                                   {v.code}
                                 </p>
                                 <p style={{ margin: "4px 0 0", fontSize: "0.8rem", color: "#64748b" }}>
-                                  {v.discount}% OFF - Tối đa {v.maxDiscount?.toLocaleString()}₫
+                                  {v.discountType === "percentage"
+                                    ? `Giảm ${v.discountValue}%`
+                                    : `Giảm ${Number(v.discountValue).toLocaleString()}₫`}
+                                </p>
+                                <p style={{ margin: 0, fontSize: "0.78rem", color: "#94a3b8" }}>
+                                  Số lượt tối đa: {v.maxUsage}
                                 </p>
                               </div>
                               <span style={{ fontSize: "1.2rem" }}>🎁</span>
@@ -1708,6 +2228,37 @@ const [selectedTab, setSelectedTab] = useState<"pending" | "paid" | "cancelled">
                 </div>
               )}
             </div>
+              {/* === DỊCH VỤ ĂN UỐNG === */}
+              <div style={{
+                background: "#fff7ed",
+                padding: "16px",
+                borderRadius: "12px",
+                margin: "20px 0",
+                border: "1px solid #fdba74",
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center"
+              }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                  <input
+                    type="checkbox"
+                    id="foodService"
+                    checked={isFoodService}
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      setIsFoodService(checked);
+                      setFinalTotal(prev => checked ? prev + 50000 : prev - 50000);
+                        resetPayosSession();
+                    }}
+                    style={{ width: "20px", height: "20px", cursor: "pointer", accentColor: "#f97316" }}
+                  />
+                  <label htmlFor="foodService" style={{ cursor: "pointer", fontWeight: "600", color: "#9a3412" }}>
+                    Dịch vụ ăn uống (+50.000₫)
+                  </label>
+                </div>
+                <span style={{ fontSize: "1.2rem" }}>🍱</span>
+              </div>
+
 {/* === FORM NHẬP ĐỊA CHỈ ĐÓN TẬN NƠI === */}
 <div style={{
   background: "#f0fdf4",
@@ -1751,7 +2302,6 @@ const [selectedTab, setSelectedTab] = useState<"pending" | "paid" | "cancelled">
 </div>
             {/* PHẦN HIỂN THỊ LOGIC */}
             {isCheckingBank ? (
-              
               <div style={{ padding: "40px 0", textAlign: "center" }}>
                 <div
                   style={{
@@ -1766,41 +2316,6 @@ const [selectedTab, setSelectedTab] = useState<"pending" | "paid" | "cancelled">
                 ></div>
                 <p style={{ color: "#64748b", marginTop: 10, fontSize: "0.9rem" }}>
                   Đang kiểm tra liên kết...
-                </p>
-              </div>
-            ) : linkedBank ? (
-              <div
-                style={{
-                  background: "#f0f9ff",
-                  padding: 20,
-                  borderRadius: 12,
-                  marginBottom: 16,
-                }}
-              >
-                <p
-                  style={{
-                    margin: 0,
-                    color: "#0f172a",
-                    fontWeight: 600,
-                    fontSize: "0.95rem",
-                  }}
-                >
-                  Thanh toán với tài khoản đã liên kết:
-                </p>
-                <p
-                  style={{
-                    margin: "8px 0 0",
-                    color: "#0ea5e9",
-                    fontWeight: 700,
-                    fontSize: "1.1rem",
-                  }}
-                >
-                  🏦 {linkedBank.bankName}
-                </p>
-                <p
-                  style={{ margin: "4px 0 0", color: "#334155", fontSize: "0.9rem" }}
-                >
-                  Chủ TK: {linkedBank.accountHolder}
                 </p>
               </div>
             ) : (
@@ -1845,6 +2360,25 @@ const [selectedTab, setSelectedTab] = useState<"pending" | "paid" | "cancelled">
                     Ngân hàng
                   </button>
                   <button
+                    onClick={() => setPaymentMethod("payos")}
+                    style={{
+                      flex: 1,
+                      padding: "10px 12px",
+                      borderRadius: 10,
+                      border:
+                        paymentMethod === "payos" ? "none" : "1px solid #e6eef9",
+                      background:
+                        paymentMethod === "payos"
+                          ? "linear-gradient(135deg,#0ea5e9,#3b82f6)"
+                          : "#fff",
+                      color: paymentMethod === "payos" ? "#fff" : "#0f172a",
+                      fontWeight: 700,
+                      cursor: "pointer",
+                    }}
+                  >
+                    PayOS
+                  </button>
+                  <button
                     onClick={() => setPaymentMethod("cash")}
                     style={{
                       flex: 1,
@@ -1864,6 +2398,207 @@ const [selectedTab, setSelectedTab] = useState<"pending" | "paid" | "cancelled">
                     Tiền mặt
                   </button>
                 </div>
+
+                {paymentMethod === "payos" && (
+                  <div
+                    style={{
+                      background: "#f0f9ff",
+                      padding: 20,
+                      borderRadius: 12,
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 12,
+                    }}
+                  >
+                    <div>
+                      <p
+                        style={{
+                          margin: 0,
+                          color: "#0f172a",
+                          fontWeight: 600,
+                          fontSize: "1rem",
+                        }}
+                      >
+                        Thanh toán qua PayOS
+                      </p>
+                      <p
+                        style={{
+                          margin: "6px 0 0",
+                          color: "#334155",
+                          fontSize: "0.9rem",
+                        }}
+                      >
+                        Nhập địa chỉ đón, sau đó tạo mã PayOS để nhận QR/chuyển khoản theo đúng mã giao dịch.
+                      </p>
+                    </div>
+
+                    <button
+                      onClick={handleGeneratePayosSession}
+                      disabled={payosGenerating}
+                      style={{
+                        padding: "10px 16px",
+                        borderRadius: 10,
+                        border: "none",
+                        background: "linear-gradient(135deg,#0ea5e9,#3b82f6)",
+                        color: "#fff",
+                        fontWeight: 700,
+                        cursor: payosGenerating ? "not-allowed" : "pointer",
+                      }}
+                    >
+                      {payosGenerating
+                        ? "Đang tạo mã PayOS..."
+                        : payosSession
+                        ? "Tạo lại mã PayOS"
+                        : "Lấy mã thanh toán PayOS"}
+                    </button>
+
+                    {payosError && (
+                      <p style={{ margin: 0, color: "#dc2626", fontSize: "0.85rem" }}>
+                        {payosError}
+                      </p>
+                    )}
+
+                    {payosSession && (
+                      <div
+                        style={{
+                          background: "#fff",
+                          borderRadius: 12,
+                          padding: 16,
+                          border: "1px solid #bae6fd",
+                          boxShadow: "0 6px 20px rgba(14,165,233,0.15)",
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                            marginBottom: 12,
+                          }}
+                        >
+                          <div>
+                            <p style={{ margin: 0, color: "#94a3b8", fontSize: "0.8rem" }}>
+                              Mã thanh toán
+                            </p>
+                            <p
+                              style={{
+                                margin: "4px 0 0",
+                                fontWeight: 700,
+                                fontSize: "1.35rem",
+                                color: "#0f172a",
+                              }}
+                            >
+                              {payosSession.orderCode}
+                            </p>
+                          </div>
+                          <button
+                            onClick={() => copyToClipboard(String(payosSession.orderCode), "Mã thanh toán")}
+                            style={{
+                              padding: "8px 12px",
+                              borderRadius: 8,
+                              border: "1px solid #e2e8f0",
+                              background: "#fff",
+                              fontWeight: 600,
+                              color: "#0ea5e9",
+                              cursor: "pointer",
+                            }}
+                          >
+                            Sao chép
+                          </button>
+                        </div>
+
+                        <p style={{ margin: "0 0 8px", color: "#0f172a" }}>
+                          Số tiền cần thanh toán: {payosSession.amount.toLocaleString()}₫
+                        </p>
+
+                        {payosSession.accountNumber && (
+                          <div
+                            style={{
+                              padding: "12px",
+                              borderRadius: 10,
+                              background: "#f8fafc",
+                              border: "1px dashed #cbd5f5",
+                              marginBottom: 12,
+                            }}
+                          >
+                            <p style={{ margin: "0 0 6px", color: "#475569", fontSize: "0.9rem" }}>
+                              Chuyển khoản tới:
+                            </p>
+                            <p style={{ margin: 0, fontWeight: 600, color: "#0f172a" }}>
+                              {payosSession.accountName || "PayOS"}
+                            </p>
+                            <p style={{ margin: "4px 0", color: "#0ea5e9", fontWeight: 700 }}>
+                              {payosSession.accountNumber}
+                              {payosSession.bankBin ? ` • Ngân hàng ${payosSession.bankBin}` : ""}
+                            </p>
+                            <button
+                              onClick={() => copyToClipboard(payosSession.accountNumber || "", "Số tài khoản")}
+                              style={{
+                                padding: "6px 10px",
+                                borderRadius: 8,
+                                border: "1px solid #e2e8f0",
+                                background: "#fff",
+                                fontSize: "0.85rem",
+                                fontWeight: 600,
+                                cursor: "pointer",
+                                color: "#0ea5e9",
+                              }}
+                            >
+                              Sao chép số tài khoản
+                            </button>
+                          </div>
+                        )}
+
+                        {payosSession.qrCode && (
+                          <div
+                            style={{
+                              border: "1px dashed #dbeafe",
+                              borderRadius: 12,
+                              padding: 12,
+                              textAlign: "center",
+                              marginBottom: 12,
+                            }}
+                          >
+                            <img
+                              src={payosSession.qrCode}
+                              alt="PayOS QR"
+                              style={{ width: "140px", height: "140px" }}
+                            />
+                            <p style={{ margin: "8px 0 0", fontSize: "0.85rem", color: "#475569" }}>
+                              Quét QR để thanh toán nhanh
+                            </p>
+                          </div>
+                        )}
+
+                        <p style={{ margin: 0, color: "#475569", fontSize: "0.85rem" }}>
+                          PayOS sẽ tự động xác nhận giao dịch và chuyển bạn về trang "Thanh toán thành công". Vé sẽ được cập nhật trong mục Đặt vé.
+                        </p>
+
+                        {(payosSession.checkoutUrl || payosSession.shortLink) && (
+                          <button
+                            onClick={() => {
+                              const targetUrl = payosSession.checkoutUrl || payosSession.shortLink;
+                              if (targetUrl) window.open(targetUrl, "_blank");
+                            }}
+                            style={{
+                              marginTop: 12,
+                              width: "100%",
+                              padding: "10px",
+                              borderRadius: 10,
+                              border: "none",
+                              background: "linear-gradient(135deg,#10b981,#059669)",
+                              color: "#fff",
+                              fontWeight: 600,
+                              cursor: "pointer",
+                            }}
+                          >
+                            Mở cổng PayOS
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {paymentMethod === "card" && (
                   <div style={{ display: "grid", gap: 10 }}>
@@ -1923,30 +2658,82 @@ const [selectedTab, setSelectedTab] = useState<"pending" | "paid" | "cancelled">
                 )}
 
                 {paymentMethod === "bank" && (
-                  <div style={{ display: "grid", gap: 10 }}>
-                    <p style={{ margin: 0, fontSize: "0.9rem", color: "#64748b" }}>
-                      Chọn ngân hàng để liên kết và thanh toán:
-                    </p>
-                    <select
-                      value={selectedBank}
-                      onChange={(e) => setSelectedBank(e.target.value)}
+                  linkedBank ? (
+                    <div
                       style={{
-                        padding: "12px",
-                        borderRadius: 10,
-                        border: "1px solid #e6eef9",
-                        outline: "none",
-                        fontSize: "0.95rem",
-                        background: "#fff",
+                        background: "#f0f9ff",
+                        padding: 20,
+                        borderRadius: 12,
+                        marginBottom: 16,
                       }}
                     >
-                      <option value="">-- Chọn ngân hàng --</option>
-                      {banks.map((bank) => (
-                        <option key={bank.id} value={bank.id}>
-                          {bank.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                      <p
+                        style={{
+                          margin: 0,
+                          color: "#0f172a",
+                          fontWeight: 600,
+                          fontSize: "0.95rem",
+                        }}
+                      >
+                        Thanh toán với tài khoản đã liên kết:
+                      </p>
+                      <p
+                        style={{
+                          margin: "8px 0 0",
+                          color: "#0ea5e9",
+                          fontWeight: 700,
+                          fontSize: "1.1rem",
+                        }}
+                      >
+                        🏦 {linkedBank.bankName}
+                      </p>
+                      <p
+                        style={{ margin: "4px 0 0", color: "#334155", fontSize: "0.9rem" }}
+                      >
+                        Chủ TK: {linkedBank.accountHolder}
+                      </p>
+                      <button
+                        onClick={() => setLinkedBank(null)}
+                        style={{
+                          marginTop: "12px",
+                          padding: "8px 12px",
+                          borderRadius: "8px",
+                          border: "1px solid #e2e8f0",
+                          background: "#fff",
+                          color: "#64748b",
+                          fontSize: "0.85rem",
+                          cursor: "pointer",
+                        }}
+                      >
+                        Sử dụng ngân hàng khác
+                      </button>
+                    </div>
+                  ) : (
+                    <div style={{ display: "grid", gap: 10 }}>
+                      <p style={{ margin: 0, fontSize: "0.9rem", color: "#64748b" }}>
+                        Chọn ngân hàng để liên kết và thanh toán:
+                      </p>
+                      <select
+                        value={selectedBank}
+                        onChange={(e) => setSelectedBank(e.target.value)}
+                        style={{
+                          padding: "12px",
+                          borderRadius: 10,
+                          border: "1px solid #e6eef9",
+                          outline: "none",
+                          fontSize: "0.95rem",
+                          background: "#fff",
+                        }}
+                      >
+                        <option value="">-- Chọn ngân hàng --</option>
+                        {banks.map((bank) => (
+                          <option key={bank.id} value={bank.id}>
+                            {bank.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )
                 )}
 
                 {paymentMethod === "cash" && (
@@ -1984,120 +2771,71 @@ const [selectedTab, setSelectedTab] = useState<"pending" | "paid" | "cancelled">
 
             {/* Nút xác nhận và hủy */}
             <div style={{ display: "flex", gap: 12, marginTop: 24, flexWrap: "wrap" }}>
-              {(isCheckingBank || !linkedBank) && (
-                <button
-                  onClick={() => handleConfirmPayment()}
-                  disabled={payLoading || isCheckingBank}
-                  className="btn-hover"
-                  style={{
-                    flex: 1,
-                    minWidth: "150px",
-                    padding: "14px",
-                    borderRadius: "12px",
-                    background: "linear-gradient(135deg, #10b981, #059669)",
-                    color: "#fff",
-                    border: "none",
-                    fontWeight: 600,
-                    fontSize: "1rem",
-                    cursor:
-                      payLoading || isCheckingBank ? "not-allowed" : "pointer",
-                    opacity: payLoading || isCheckingBank ? 0.7 : 1,
-                  }}
-                >
-                  {payLoading
-                    ? "Đang xử lý..."
-                    : paymentMethod === "cash"
-                    ? "Xác Nhận (Tiền mặt)"
-                    : "Xác Nhận Thanh Toán"}
-                </button>
-              )}
+              <button
+                onClick={() => handleConfirmPayment()}
+                disabled={payLoading || isCheckingBank}
+                className="btn-hover"
+                style={{
+                  flex: 1,
+                  minWidth: "150px",
+                  padding: "14px",
+                  borderRadius: "12px",
+                  background: "linear-gradient(135deg, #10b981, #059669)",
+                  color: "#fff",
+                  border: "none",
+                  fontWeight: 600,
+                  fontSize: "1rem",
+                  cursor:
+                    payLoading || isCheckingBank ? "not-allowed" : "pointer",
+                  opacity: payLoading || isCheckingBank ? 0.7 : 1,
+                }}
+              >
+                {payLoading
+                  ? "Đang xử lý..."
+                  : paymentMethod === "cash"
+                  ? "Xác Nhận (Tiền mặt)"
+                  : paymentMethod === "payos"
+                  ? "Thanh toán PayOS"
+                  : "Xác Nhận Thanh Toán"}
+              </button>
 
-              {!isCheckingBank && linkedBank && (
-                <button
-                  onClick={() => handleConfirmPayment()}
-                  disabled={payLoading}
-                  className="btn-hover"
-                  style={{
-                    flex: 1,
-                    minWidth: "150px",
-                    padding: "14px",
-                    borderRadius: "12px",
-                    background: "linear-gradient(135deg, #10b981, #059669)",
-                    color: "#fff",
-                    border: "none",
-                    fontWeight: 600,
-                    fontSize: "1rem",
-                    cursor: payLoading ? "not-allowed" : "pointer",
-                    opacity: payLoading ? 0.7 : 1,
-                  }}
-                >
-                  {payLoading ? "Đang xử lý..." : `Xác nhận (Bank)`}
-                </button>
-              )}
+              <button
+                onClick={() => {
+                  setPaymentMethod("payos");
+                  handleConfirmPayment("payos");
+                }}
+                disabled={payLoading || isCheckingBank}
+                className="btn-hover"
+                style={{
+                  flex: 1,
+                  minWidth: "150px",
+                  padding: "14px",
+                  borderRadius: "12px",
+                  background: "linear-gradient(135deg, #3b82f6, #2563eb)",
+                  color: "#fff",
+                  border: "none",
+                  fontWeight: 600,
+                  fontSize: "1rem",
+                  cursor:
+                    payLoading || isCheckingBank ? "not-allowed" : "pointer",
+                  opacity: payLoading || isCheckingBank ? 0.7 : 1,
+                }}
+              >
+                Thanh toán PayOS
+              </button>
 
-              {!isCheckingBank && linkedBank && (
-                <button
-                  onClick={() => handleConfirmPayment("cash")}
-                  disabled={payLoading}
-                  className="btn-hover"
-                  style={{
-                    flex: 1,
-                    minWidth: "150px",
-                    padding: "14px",
-                    borderRadius: "12px",
-                    background: "linear-gradient(135deg, #0ea5e9, #3b82f6)",
-                    color: "#fff",
-                    border: "none",
-                    fontWeight: 600,
-                    fontSize: "1rem",
-                    cursor: payLoading ? "not-allowed" : "pointer",
-                    opacity: payLoading ? 0.7 : 1,
-                  }}
-                >
-                  Xác nhận (Tiền mặt)
-                </button>
-              )}
-
-              {(isCheckingBank || !linkedBank) && (
-                <button
-                  onClick={() => {
-                    setShowPaymentForm(false);
-                    setLinkedBank(null);
-                    setAppliedVoucher(null);
-                  }}
-                  disabled={payLoading}
-                  className="btn-hover"
-                  style={{
-                    flex: 1,
-                    minWidth: "150px",
-                    padding: "14px",
-                    borderRadius: "12px",
-                    background: "#f1f5f9",
-                    color: "#64748b",
-                    border: "none",
-                    fontWeight: 600,
-                    fontSize: "1rem",
-                    cursor: payLoading ? "not-allowed" : "pointer",
-                    opacity: payLoading ? 0.7 : 1,
-                  }}
-                >
-                  Hủy
-                </button>
-              )}
-            </div>
-
-            {!isCheckingBank && linkedBank && (
               <button
                 onClick={() => {
                   setShowPaymentForm(false);
                   setLinkedBank(null);
                   setAppliedVoucher(null);
+                    resetPayosSession();
                 }}
                 disabled={payLoading}
                 className="btn-hover"
                 style={{
-                  width: "100%",
-                  marginTop: "10px",
+                  flex: 1,
+                  minWidth: "150px",
                   padding: "14px",
                   borderRadius: "12px",
                   background: "#f1f5f9",
@@ -2111,7 +2849,7 @@ const [selectedTab, setSelectedTab] = useState<"pending" | "paid" | "cancelled">
               >
                 Hủy
               </button>
-            )}
+            </div>
           </div>
         </div>
       )}

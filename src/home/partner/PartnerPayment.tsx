@@ -1,11 +1,13 @@
 // File: src/home/partner/PartnerPayment.tsx
 import { useEffect, useState } from "react";
-import { DollarSign, TrendingUp, RefreshCw, Clock, Check, X } from "lucide-react";
+import { DollarSign, RefreshCw } from "lucide-react";
 import { auth } from "../../firebase/config";
 import { getBookingsByPartnerId } from "../../api/bookingApi";
 import { getFeeConfig } from "../../api/feeApi";
 import { socket } from "../../utils/socket";
 import { createPaymentLink } from "../../api/payosApi";
+import type { PartnerLedger } from "../../api/ledgerApi";
+import { fetchPartnerLedger, rebuildPartnerLedger } from "../../api/ledgerApi";
 
 import {
   ResponsiveContainer,
@@ -16,35 +18,7 @@ import {
 } from "recharts";
 
 // Inline replacement for removed ../../api/withdrawalApi
-const API_BASE = "http://localhost:5000";
-
-async function getWithdrawableAmount(partnerId: string) {
-  try {
-    // try primary endpoint
-    const res = await fetch(`${API_BASE}/api/withdraws/amount/${partnerId}`);
-    if (res.ok) {
-      const j = await res.json();
-      return { success: true, withdrawableAmount: Number(j.withdrawableAmount ?? j.amount ?? 0) };
-    }
-
-    // primary failed — try common fallback endpoint
-    const res2 = await fetch(`${API_BASE}/api/withdrawals/available/${partnerId}`);
-    if (res2.ok) {
-      const j2 = await res2.json();
-      return { success: true, withdrawableAmount: Number(j2.withdrawableAmount ?? j2.amount ?? 0) };
-    }
-
-    // if both are 404 -> mark notFound so UI can fallback to client-side computed value
-    if (res.status === 404 && res2.status === 404) {
-      return { success: false, notFound: true, withdrawableAmount: 0 };
-    }
-
-    // other failures
-    return { success: false, withdrawableAmount: 0 };
-  } catch (err) {
-    return { success: false, message: (err as Error).message ?? "Error", withdrawableAmount: 0 };
-  }
-}
+const API_BASE = import.meta.env.VITE_API_URL ?? "http://localhost:5000";
 
 async function getWithdrawalHistory(partnerId: string) {
   try {
@@ -109,97 +83,10 @@ async function createWithdrawalRequest(
   }
 }
 
-// --- Local persistence helpers (fallback when backend doesn't persist) ---
-function loadLocalWithdrawals(): WithdrawalType[] {
-  try {
-    const raw = localStorage.getItem("local_withdrawals");
-    if (!raw) return [];
-    const parsed = JSON.parse(raw) as WithdrawalType[];
-    return Array.isArray(parsed) ? parsed : [];
-  } catch (e) {
-    return [];
-  }
-}
-
-function saveLocalWithdrawals(items: WithdrawalType[]) {
-  try {
-    localStorage.setItem("local_withdrawals", JSON.stringify(items));
-  } catch (e) {
-    console.warn("Không thể lưu local withdrawals:", e);
-  }
-}
-
-function addLocalWithdrawal(item: WithdrawalType) {
-  const list = loadLocalWithdrawals();
-  list.unshift(item);
-  saveLocalWithdrawals(list);
-}
-
-function removeLocalWithdrawal(id: string) {
-  const list = loadLocalWithdrawals().filter(w => w._id !== id);
-  saveLocalWithdrawals(list);
-}
-
-// Persistent deduction total stored when backend is missing. This ensures the
-// deducted amount survives reloads even after we remove successful items from history.
-function loadLocalDeductionTotal(): number {
-  try {
-    const raw = localStorage.getItem("local_withdrawn_total");
-    if (!raw) return 0;
-    const n = Number(raw);
-    return isNaN(n) ? 0 : n;
-  } catch (e) {
-    return 0;
-  }
-}
-
-function saveLocalDeductionTotal(n: number) {
-  try {
-    localStorage.setItem("local_withdrawn_total", String(n));
-  } catch (e) {
-    console.warn("Không thể lưu local withdrawn total:", e);
-  }
-}
-
-function addLocalDeduction(amount: number) {
-  const cur = loadLocalDeductionTotal();
-  saveLocalDeductionTotal(cur + (amount || 0));
-}
-
-function applyLocalDeduction(amount: number) {
-  const deducted = loadLocalDeductionTotal();
-  return Math.max(0, (amount || 0) - deducted);
-}
-
-function loadLocalServiceFeePaid(): number {
-  try {
-    const raw = localStorage.getItem("local_service_fee_paid");
-    if (!raw) return 0;
-    const n = Number(raw);
-    return isNaN(n) ? 0 : n;
-  } catch (e) {
-    return 0;
-  }
-}
-
-function saveLocalServiceFeePaid(n: number) {
-  try {
-    localStorage.setItem("local_service_fee_paid", String(n));
-  } catch (e) {
-    console.warn("Không thể lưu local service fee paid:", e);
-  }
-}
-
-function addLocalServiceFeePaid(amount: number) {
-  if (!amount) return;
-  const cur = loadLocalServiceFeePaid();
-  saveLocalServiceFeePaid(cur + amount);
-}
-
-function applyLocalServiceFeePaid(amount: number) {
-  const paid = loadLocalServiceFeePaid();
-  return Math.max(0, (amount || 0) - paid);
-}
+// --- Local persistence helpers disabled to rely purely on backend ---
+const loadLocalWithdrawals = (): WithdrawalType[] => [];
+const addLocalWithdrawal = (_item: WithdrawalType) => {};
+const removeLocalWithdrawal = (_id: string) => {};
 
 // ---------- Types ----------
 type BookingType = {
@@ -324,7 +211,7 @@ const BookingDetail = ({ booking, feePercent }: { booking: BookingType; feePerce
 
 // =============== MAIN COMPONENT =====================
 export default function PartnerPayment() {
-  const [activeTab, setActiveTab] = useState<"overview" | "pending" | "transactions" | "withdraw">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "transactions" | "withdraw">("overview");
 
   const [stats, setStats] = useState<StatsType>({
     totalRevenue: 0,
@@ -338,10 +225,6 @@ export default function PartnerPayment() {
   const [bookings, setBookings] = useState<BookingType[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [pendingBookings, setPendingBookings] = useState<BookingType[]>([]);
-  const [approvingId, setApprovingId] = useState<string | null>(null);
-  const [rejectingId, setRejectingId] = useState<string | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
   const [feePercent, setFeePercent] = useState<number>(0);
 
   // ✅ Withdrawal states
@@ -364,17 +247,8 @@ export default function PartnerPayment() {
   const [payosQrLoadError, setPayosQrLoadError] = useState(false);
   const [payosOrderCode, setPayosOrderCode] = useState("");
   const [payosAmount, setPayosAmount] = useState<number | null>(null);
-
-  // flag: backend withdraw endpoints missing -> use client-side stats fallback
-  const [withdrawEndpointMissing, setWithdrawEndpointMissing] = useState<boolean>(false);
-
-  // Ensure UI shows a consistent value when backend withdraw endpoints are missing
-  useEffect(() => {
-    if (withdrawEndpointMissing) {
-      // Keep withdrawableAmount in sync with computed stats.amountAfterFee
-      setWithdrawableAmount(stats.amountAfterFee || 0);
-    }
-  }, [stats.amountAfterFee, withdrawEndpointMissing]);
+  const [ledgerSnapshot, setLedgerSnapshot] = useState<PartnerLedger | null>(null);
+  const [preferLedgerBalances, setPreferLedgerBalances] = useState(false);
 
   // ✅ Add state cho bank info
   const [showBankForm, setShowBankForm] = useState(false);
@@ -400,6 +274,72 @@ export default function PartnerPayment() {
       currency: "VND",
     }).format(amount);
 
+  const applyLedgerSnapshot = (snapshot: PartnerLedger | null) => {
+    if (!snapshot) return;
+    const totalRevenue = Number(snapshot.totalRevenue || 0);
+    const totalServiceFee = Number(snapshot.totalServiceFee || 0);
+    const serviceFeeBalance = snapshot.serviceFeeBalance != null
+      ? Number(snapshot.serviceFeeBalance)
+      : totalServiceFee;
+    const receivableBalance = Math.max(0, Number(snapshot.receivableBalance || 0));
+
+    setLedgerSnapshot(snapshot);
+    setStats((prev) => ({
+      ...prev,
+      totalRevenue,
+      withdrawnAmount: totalRevenue,
+      serviceFee: serviceFeeBalance,
+      amountAfterFee: receivableBalance,
+    }));
+    setWithdrawableAmount(receivableBalance);
+  };
+
+  const loadLedger = async (id: string) => {
+    if (!id) return;
+    try {
+      const res = await fetchPartnerLedger(id);
+      if (res?.ledger) {
+        setPreferLedgerBalances(true);
+        applyLedgerSnapshot(res.ledger);
+      }
+    } catch (err) {
+      console.error("Không thể lấy ledger:", err);
+      setPreferLedgerBalances(false);
+    }
+  };
+
+  const rebuildLedgerSnapshot = async (id: string) => {
+    if (!id) return;
+    try {
+      await rebuildPartnerLedger(id);
+      await loadLedger(id);
+    } catch (err) {
+      console.error("Không thể rebuild ledger:", err);
+    }
+  };
+
+  const fetchWithdrawalHistory = async (id: string) => {
+    if (!id) return;
+
+    try {
+      const historyRes = await getWithdrawalHistory(id);
+      if (historyRes.success) {
+        const local = loadLocalWithdrawals();
+        const server = historyRes.withdrawals ?? [];
+        const merged = [
+          ...local.filter((l) => !server.some((s: any) => s._id === l._id)),
+          ...server,
+        ];
+        setWithdrawalHistory(merged);
+      } else if (historyRes.notFound) {
+        setWithdrawalHistory(loadLocalWithdrawals());
+        console.warn("Fallback: backend withdrawal history endpoint not found");
+      }
+    } catch (err) {
+      console.error("❌ Error loading withdrawal history:", err);
+    }
+  };
+
   // Fetch phí dịch vụ động
   useEffect(() => {
     const fetchFee = async () => {
@@ -413,6 +353,11 @@ export default function PartnerPayment() {
     };
     fetchFee();
   }, []);
+
+  useEffect(() => {
+    if (!partnerId) return;
+    loadLedger(partnerId);
+  }, [partnerId]);
 
   // Fetch bookings + stats
   useEffect(() => {
@@ -461,21 +406,21 @@ export default function PartnerPayment() {
 
         const amountAfterFee = withdrawnAmount - totalServiceFee - totalDiscounts;
 
-        // Subtract any locally persisted successful withdrawals (deduction total)
-        const adjustedAmountAfterFee = applyLocalDeduction(amountAfterFee);
-        const displayedServiceFee = applyLocalServiceFeePaid(totalServiceFee);
-
-        setStats({
-          totalRevenue,
+        setStats((prev) => ({
+          ...prev,
+          totalRevenue: preferLedgerBalances ? prev.totalRevenue : totalRevenue,
           pendingAmount,
-          withdrawnAmount,
+          withdrawnAmount: preferLedgerBalances ? prev.withdrawnAmount : withdrawnAmount,
           refundAmount,
-          serviceFee: displayedServiceFee,
-          amountAfterFee: adjustedAmountAfterFee,
-        });
+          serviceFee: preferLedgerBalances ? prev.serviceFee : totalServiceFee,
+          amountAfterFee: preferLedgerBalances ? prev.amountAfterFee : amountAfterFee,
+        }));
 
-        // Keep withdrawable amount in sync with computed stats so top and withdraw panel match
-        setWithdrawableAmount(adjustedAmountAfterFee);
+        // Keep withdrawable amount in sync with computed stats only when backend snapshot unavailable
+        if (!preferLedgerBalances) {
+          setWithdrawableAmount(amountAfterFee);
+          await rebuildLedgerSnapshot(partnerId);
+        }
       } catch (err: unknown) {
         const msg =
           err instanceof Error ? err.message : "Lỗi khi lấy dữ liệu.";
@@ -486,110 +431,22 @@ export default function PartnerPayment() {
     };
 
     fetchStats();
-  }, [partnerId, feePercent]);
+  }, [partnerId, feePercent, preferLedgerBalances]);
 
-  // ✅ Lấy booking pending
+  // (Pending bookings UI has been removed)
+
+  // ✅ Load withdrawal history
   useEffect(() => {
-    const fetchPending = async () => {
-      if (!partnerId) return;
-
-      try {
-        const data = await getBookingsByPartnerId(partnerId);
-        const bookingsData: BookingType[] = Array.isArray(data)
-          ? data
-          : data.bookings || [];
-
-        const pending = bookingsData.filter(b => b.status === "pending");
-        setPendingBookings(pending);
-      } catch (err) {
-        console.error("Lỗi lấy booking pending:", err);
-      }
-    };
-
-    fetchPending();
+    if (!partnerId) return;
+    fetchWithdrawalHistory(partnerId);
   }, [partnerId]);
-
-  // ✅ Load withdrawal data
-  useEffect(() => {
-    const loadWithdrawalData = async () => {
-      if (!partnerId) return;
-
-      try {
-        const amountRes = await getWithdrawableAmount(partnerId);
-        if (amountRes.success) {
-          setWithdrawEndpointMissing(false);
-          // Keep the displayed 'Nhận được (sau phí)' and 'Phí dịch vụ' in sync
-          // with the server-authoritative breakdown so amounts persist after reloads.
-          const breakdown = (amountRes as any).breakdown || null;
-          if (breakdown) {
-            const totalPaid = Number(breakdown.totalPaid ?? 0);
-            const totalServiceFee = Number(breakdown.totalServiceFee ?? 0);
-            const totalDiscounts = Number(breakdown.totalDiscounts ?? 0);
-            const amountAfterFeeGross = Number(breakdown.amountAfterFeeGross ?? Math.max(0, totalPaid - totalServiceFee - totalDiscounts));
-            const withdrawnFromFee = Number(breakdown.withdrawnFromFee ?? 0);
-            const withdrawnFromReceived = Number(breakdown.withdrawnFromReceived ?? 0);
-
-            // amountAfterFee shown to partner = gross received (after fees) minus already-withdrawn received
-            const remainingReceived = Math.max(0, amountAfterFeeGross - withdrawnFromReceived);
-            const adjustedRemaining = applyLocalDeduction(remainingReceived);
-
-            setStats((prev) => ({
-              ...prev,
-              totalRevenue: totalPaid,
-              serviceFee: applyLocalServiceFeePaid(totalServiceFee),
-              withdrawnAmount: withdrawnFromFee + withdrawnFromReceived,
-              amountAfterFee: adjustedRemaining,
-            }));
-            setWithdrawableAmount(adjustedRemaining);
-          } else {
-            // If no breakdown provided, still align amountAfterFee with withdrawableAmount
-            const fallbackAmount = applyLocalDeduction(Number(amountRes.withdrawableAmount ?? 0));
-            setStats((prev) => ({ ...prev, amountAfterFee: fallbackAmount }));
-            setWithdrawableAmount(fallbackAmount);
-          }
-        } else if (amountRes.notFound) {
-          // backend missing endpoint -> mark missing and use stats fallback (may be 0 now)
-          setWithdrawEndpointMissing(true);
-          setWithdrawableAmount(stats.amountAfterFee || 0);
-          console.warn("Fallback: backend withdraw amount endpoint not found, using stats.amountAfterFee");
-        } else {
-          setWithdrawableAmount(applyLocalDeduction(0));
-        }
-
-        const historyRes = await getWithdrawalHistory(partnerId);
-        if (historyRes.success) {
-          // Merge server-provided withdrawals with local synthetic ones persisted in localStorage
-          const local = loadLocalWithdrawals();
-          // avoid duplicates by id
-          const server = historyRes.withdrawals ?? [];
-          const merged = [...local.filter(l => !server.some((s: any) => s._id === l._id)), ...server];
-          setWithdrawalHistory(merged);
-        } else if (historyRes.notFound) {
-          // Server doesn't have history endpoint — load local persisted ones
-          const local = loadLocalWithdrawals();
-          setWithdrawalHistory(local);
-          console.warn("Fallback: backend withdrawal history endpoint not found");
-        }
-      } catch (err) {
-        console.error("❌ Error loading withdrawal data:", err);
-      }
-    };
-
-    loadWithdrawalData();
-  }, [partnerId]); // keep partnerId only to avoid duplicate calls
 
   // ✅ Listen socket events
   useEffect(() => {
-    const onFeeUpdated = async (data: any) => {
+    const onFeeUpdated = (data: any) => {
       console.log("📡 Received feeUpdated:", data);
       const newPercent = data?.newPercent ?? data?.fee?.percent ?? 0;
       setFeePercent(newPercent);
-
-      try {
-        await handleRefreshData();
-      } catch (e) {
-        console.warn("Không thể refresh sau khi nhận feeUpdated:", e);
-      }
 
       alert(`📣 Phí dịch vụ đã được cập nhật: ${newPercent}%`);
     };
@@ -627,7 +484,8 @@ export default function PartnerPayment() {
       alert(`✅ Rút tiền thành công: ${amount.toLocaleString()}đ`);
 
       // Refresh data so history + service fee/withdrawable amount reflect deduction
-      loadWithdrawalData();
+      loadWithdrawalHistory();
+      loadLedger(partnerId);
       setWithdrawAmount("");
     };
 
@@ -640,57 +498,7 @@ export default function PartnerPayment() {
     };
   }, []);
 
-  const loadWithdrawalData = async () => {
-    if (!partnerId) return;
-
-    try {
-      const amountRes = await getWithdrawableAmount(partnerId);
-      if (amountRes.success) {
-        const breakdown = (amountRes as any).breakdown || null;
-        if (breakdown) {
-          const totalPaid = Number(breakdown.totalPaid ?? 0);
-          const totalServiceFee = Number(breakdown.totalServiceFee ?? 0);
-          const totalDiscounts = Number(breakdown.totalDiscounts ?? 0);
-          const amountAfterFeeGross = Number(breakdown.amountAfterFeeGross ?? Math.max(0, totalPaid - totalServiceFee - totalDiscounts));
-          const withdrawnFromFee = Number(breakdown.withdrawnFromFee ?? 0);
-          const withdrawnFromReceived = Number(breakdown.withdrawnFromReceived ?? 0);
-          const remainingReceived = Math.max(0, amountAfterFeeGross - withdrawnFromReceived);
-          const adjustedRemaining = applyLocalDeduction(remainingReceived);
-
-          setStats((prev) => ({
-            ...prev,
-            totalRevenue: totalPaid,
-            serviceFee: applyLocalServiceFeePaid(totalServiceFee),
-            withdrawnAmount: withdrawnFromFee + withdrawnFromReceived,
-            amountAfterFee: adjustedRemaining,
-          }));
-          setWithdrawableAmount(adjustedRemaining);
-        } else {
-          const fallbackAmount = applyLocalDeduction(Number(amountRes.withdrawableAmount ?? 0));
-          setStats((prev) => ({ ...prev, amountAfterFee: fallbackAmount }));
-          setWithdrawableAmount(fallbackAmount);
-        }
-      } else if (amountRes.notFound) {
-        // backend missing endpoint -> fallback to stats.amountAfterFee (client-side computed)
-        setWithdrawableAmount(stats.amountAfterFee || 0);
-        console.warn("Fallback: backend withdraw amount endpoint not found, using stats.amountAfterFee");
-      }
-
-      const historyRes = await getWithdrawalHistory(partnerId);
-      if (historyRes.success) {
-        const local = loadLocalWithdrawals();
-        const server = historyRes.withdrawals ?? [];
-        const merged = [...local.filter(l => !server.some((s: any) => s._id === l._id)), ...server];
-        setWithdrawalHistory(merged);
-      } else if (historyRes.notFound) {
-        // backend missing endpoint -> empty history (or keep local state)
-        setWithdrawalHistory(loadLocalWithdrawals());
-        console.warn("Fallback: backend withdrawal history endpoint not found");
-      }
-    } catch (err) {
-      console.error("❌ Error loading withdrawal data:", err);
-    }
-  };
+  const loadWithdrawalHistory = async () => fetchWithdrawalHistory(partnerId);
 
   // Delete a withdrawal (backend if available, otherwise remove local/synthetic entry)
   const handleDeleteWithdrawal = async (id: string) => {
@@ -743,214 +551,9 @@ export default function PartnerPayment() {
     }
   };
 
-  const handleApproveBooking = async (bookingId: string) => {
-    try {
-      setApprovingId(bookingId);
+  // Pending approval UI removed
 
-      const booking = pendingBookings.find(b => b._id === bookingId);
-      if (!booking) {
-        alert("Không tìm thấy booking!");
-        setApprovingId(null);
-        return;
-      }
-
-      const response = await fetch(`http://localhost:5000/api/bookings/${bookingId}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          status: "paid",
-          finalTotal: booking.totalPrice,
-        }),
-      });
-
-      const result = await response.json();
-
-      if (result.success) {
-        const updatedBooking = result.booking;
-        const fee = updatedBooking.feePercent ?? 0;
-        const serviceFeeAmount = updatedBooking.serviceFeeAmount ?? 0;
-        const amountReceived = (booking.totalPrice || 0) - serviceFeeAmount;
-
-        alert(`✅ Duyệt thành công!\n\n📌 Phí dịch vụ: ${fee}%\n💰 Tiền phí: ${formatCurrency(serviceFeeAmount)}\n✅ Nhận được: ${formatCurrency(amountReceived)}`);
-
-        await handleRefreshData();
-      } else {
-        alert(`❌ Duyệt thất bại: ${result.message}`);
-      }
-    } catch (err) {
-      console.error("❌ Lỗi duyệt booking:", err);
-      alert("❌ Lỗi duyệt booking: " + (err instanceof Error ? err.message : "Không xác định"));
-    } finally {
-      setApprovingId(null);
-    }
-  };
-
-  const handleRejectBooking = async (bookingId: string) => {
-    if (!confirm("Bạn chắc chắn muốn từ chối booking này?")) return;
-
-    try {
-      setRejectingId(bookingId);
-
-      const response = await fetch(`http://localhost:5000/api/bookings/${bookingId}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          status: "cancelled",
-        }),
-      });
-
-      const result = await response.json();
-
-      if (result.success || response.ok) {
-        alert("✅ Từ chối booking thành công!");
-        await handleRefreshData();
-      } else {
-        alert("❌ Từ chối thất bại!");
-      }
-    } catch (err) {
-      console.error("Lỗi từ chối booking:", err);
-      alert("Lỗi từ chối booking!");
-    } finally {
-      setRejectingId(null);
-    }
-  };
-
-  const handleRefreshData = async () => {
-    try {
-      setRefreshing(true);
-
-      const feeRes = await getFeeConfig();
-      const newFeePercent = feeRes.fee?.percent || 0;
-      setFeePercent(newFeePercent);
-
-      const data = await getBookingsByPartnerId(partnerId);
-      const bookingsData: BookingType[] = Array.isArray(data)
-        ? data
-        : data.bookings || [];
-
-      setBookings(bookingsData);
-
-      let totalRevenue = 0;
-      let pendingAmount = 0;
-      let withdrawnAmount = 0;
-      let refundAmount = 0;
-      let totalServiceFee = 0;
-
-      bookingsData.forEach((b) => {
-        const price = b.finalTotal || b.totalPrice || 0;
-        totalRevenue += price;
-
-        if (b.status === "pending") {
-          pendingAmount += price;
-        } else if (b.status === "paid") {
-          withdrawnAmount += price;
-          totalServiceFee += b.serviceFeeAmount || 0;
-        } else if (b.status === "refunded") {
-          refundAmount += price;
-        }
-      });
-
-      const amountAfterFee = withdrawnAmount - totalServiceFee;
-
-      // Prefer server-authoritative withdrawable/breakdown when available so
-      // the displayed 'Nhận được (sau phí)' includes permanent withdrawals.
-      try {
-        const amountRes = await getWithdrawableAmount(partnerId);
-        if (amountRes && amountRes.success) {
-          const breakdown = (amountRes as any).breakdown || null;
-          if (breakdown) {
-            const totalPaid = Number(breakdown.totalPaid ?? totalRevenue);
-            const serverTotalServiceFee = Number(breakdown.totalServiceFee ?? totalServiceFee);
-            const totalDiscounts = Number(breakdown.totalDiscounts ?? 0);
-            const amountAfterFeeGross = Number(breakdown.amountAfterFeeGross ?? Math.max(0, totalPaid - serverTotalServiceFee - totalDiscounts));
-            const withdrawnFromFee = Number(breakdown.withdrawnFromFee ?? 0);
-            const withdrawnFromReceived = Number(breakdown.withdrawnFromReceived ?? 0);
-            const remainingReceived = Math.max(0, amountAfterFeeGross - withdrawnFromReceived);
-            const adjustedRemaining = applyLocalDeduction(remainingReceived);
-
-            setStats({
-              totalRevenue: totalPaid,
-              pendingAmount,
-              withdrawnAmount: withdrawnFromFee + withdrawnFromReceived,
-              refundAmount,
-              serviceFee: applyLocalServiceFeePaid(serverTotalServiceFee),
-              amountAfterFee: adjustedRemaining,
-            });
-            setWithdrawableAmount(adjustedRemaining);
-          } else {
-            // no breakdown: fall back to server withdrawableAmount for amountAfterFee
-            const serverAmountAfterFee = Number(amountRes.withdrawableAmount ?? amountAfterFee);
-            const adjustedServerAmount = applyLocalDeduction(serverAmountAfterFee);
-            setStats({
-              totalRevenue,
-              pendingAmount,
-              withdrawnAmount,
-              refundAmount,
-              serviceFee: applyLocalServiceFeePaid(totalServiceFee),
-              amountAfterFee: adjustedServerAmount,
-            });
-            setWithdrawableAmount(adjustedServerAmount);
-          }
-        } else {
-          // server not available -> use client-side computed totals
-          const adjustedClientAmount = applyLocalDeduction(amountAfterFee);
-          setStats({
-            totalRevenue,
-            pendingAmount,
-            withdrawnAmount,
-            refundAmount,
-            serviceFee: applyLocalServiceFeePaid(totalServiceFee),
-            amountAfterFee: adjustedClientAmount,
-          });
-          setWithdrawableAmount(adjustedClientAmount);
-        }
-      } catch (e) {
-        // on error, fall back to client-side computation
-        const adjustedClientAmount = applyLocalDeduction(amountAfterFee);
-        setStats({
-          totalRevenue,
-          pendingAmount,
-          withdrawnAmount,
-          refundAmount,
-          serviceFee: applyLocalServiceFeePaid(totalServiceFee),
-          amountAfterFee: adjustedClientAmount,
-        });
-        setWithdrawableAmount(adjustedClientAmount);
-      }
-
-      const pending = bookingsData.filter(b => b.status === "pending");
-      setPendingBookings(pending);
-
-      await loadWithdrawalData();
-
-      alert("✅ Cập nhật dữ liệu thành công!");
-    } catch (err) {
-      console.error("Lỗi refresh:", err);
-      alert("❌ Lỗi cập nhật dữ liệu!");
-    } finally {
-      setRefreshing(false);
-    }
-  };
-
-    // When the user switches to the withdraw tab, refresh bookings/fee and withdrawal data
-    useEffect(() => {
-      if (activeTab !== "withdraw" || !partnerId) return;
-
-      let cancelled = false;
-      (async () => {
-        try {
-          await handleRefreshData();
-          if (cancelled) return;
-          await loadWithdrawalData();
-        } catch (err) {
-          console.error("Error updating withdraw tab data:", err);
-        }
-      })();
-
-      return () => {
-        cancelled = true;
-      };
-    }, [activeTab, partnerId]);
+  // Manual refresh feature removed per request
 
   // ✅ Handle withdraw
   const handleWithdraw = async (overrideMethod?: string) => {
@@ -1031,31 +634,20 @@ export default function PartnerPayment() {
         // show user that payment is pending; when provider calls our webhook
         // (hoặc bạn tự xác nhận), frontend vẫn nghe socket để đồng bộ. Đồng thời
         // hiển thị ngay trong lịch sử là đã trừ phí dịch vụ.
-        alert('✅ Đã tạo yêu cầu PayOS và trừ phí dịch vụ tương ứng. Vui lòng hoàn tất thanh toán.');
+        alert('✅ Đã tạo yêu cầu PayOS. Vui lòng hoàn tất thanh toán PayOS để hệ thống trừ phí.');
 
-        // show success entry locally for UX so lịch sử phản ánh việc đã trừ phí
+        // Track pending entry locally so user can follow status while waiting for webhook
         const localId = withdrawRes.withdrawal?._id ?? `local-${Date.now()}`;
         const localWithdrawal: WithdrawalType = {
           _id: String(localId),
           amount,
           paymentMethod: method,
           createdAt: new Date().toISOString(),
-          status: "success",
+          status: "pending",
         };
         setWithdrawalHistory((prev) => [localWithdrawal, ...prev]);
         addLocalWithdrawal(localWithdrawal);
 
-        // cập nhật banner thành công để người dùng dễ nhận biết
-        setPayosSuccessInfo({ amount, orderCode, createdAt: localWithdrawal.createdAt });
-
-        // giảm phí dịch vụ hiển thị nhưng giữ nguyên phần "Nhận được"
-        setStats((prev) => ({
-          ...prev,
-          serviceFee: Math.max(0, prev.serviceFee - amount),
-        }));
-        addLocalServiceFeePaid(amount);
-
-        // lưu trạng thái cục bộ để sau khi reload vẫn giữ số tiền đã trừ vào phí dịch vụ
         setWithdrawAmount("");
         return;
       } else {
@@ -1087,10 +679,6 @@ export default function PartnerPayment() {
 
         setWithdrawalHistory((prev) => [localWithdrawal, ...prev]);
         addLocalWithdrawal(localWithdrawal);
-        // deduction persisted on backend; optimistic UI adjust
-        setWithdrawableAmount((prev) => Math.max(0, prev - amount));
-        setStats((prev) => ({ ...prev, amountAfterFee: Math.max(0, prev.amountAfterFee - amount) }));
-        addLocalDeduction(amount);
 
         setWithdrawAmount("");
         setBankName("");
@@ -1098,6 +686,8 @@ export default function PartnerPayment() {
         setAccountHolder("");
         setShowBankForm(false);
         alert("✅ Yêu cầu rút tiền đã được tạo và lưu. Đã trừ vào hạn mức.");
+        await loadLedger(partnerId);
+        await loadWithdrawalHistory();
         return;
       }
 
@@ -1196,28 +786,18 @@ export default function PartnerPayment() {
       value: stats.totalRevenue,
       icon: <DollarSign size={22} />,
       accent: "linear-gradient(135deg,#4ade80,#22c55e)",
-      desc: "Tất cả giao dịch đã ghi nhận",
-    },
-    {
-      label: "Chờ xử lý",
-      value: stats.pendingAmount,
-      icon: <Clock size={22} />,
-      accent: "linear-gradient(135deg,#fde047,#f97316)",
-      desc: "Vé cần duyệt hoặc thanh toán",
-    },
-    {
-      label: "Đã thanh toán",
-      value: stats.withdrawnAmount,
-      icon: <TrendingUp size={22} />,
-      accent: "linear-gradient(135deg,#818cf8,#6366f1)",
-      desc: "Doanh số đã hoàn tất",
+      desc: ledgerSnapshot?.lastBookingAt
+        ? `Đồng bộ đến ${new Date(ledgerSnapshot.lastBookingAt).toLocaleString("vi-VN")}`
+        : "Tất cả giao dịch đã ghi nhận",
     },
     {
       label: `Phí dịch vụ (${feePercent}%)`,
       value: stats.serviceFee,
       icon: <RefreshCw size={22} />,
       accent: "linear-gradient(135deg,#fca5a5,#f87171)",
-      desc: "Đã khấu trừ vào hệ thống",
+      desc: ledgerSnapshot
+        ? `Còn phải thanh toán • Tổng phát sinh: ${formatCurrency(ledgerSnapshot.totalServiceFee || 0)}`
+        : "Đã khấu trừ vào hệ thống",
       prefix: "-",
     },
     {
@@ -1225,7 +805,7 @@ export default function PartnerPayment() {
       value: stats.amountAfterFee,
       icon: <DollarSign size={22} />, // reuse icon for emphasis
       accent: "linear-gradient(135deg,#34d399,#10b981)",
-      desc: "Số tiền có thể rút",
+      desc: preferLedgerBalances ? "Theo số dư receivable trong ledger" : "Số tiền có thể rút",
     },
   ];
 
@@ -1237,26 +817,6 @@ export default function PartnerPayment() {
             <h1 style={styles.title}>💳 Quản lý thanh toán</h1>
             <p style={styles.subtitle}>Theo dõi doanh thu, giao dịch và rút tiền</p>
           </div>
-          <button
-            onClick={handleRefreshData}
-            disabled={refreshing}
-            style={{
-              padding: "10px 16px",
-              background: "#2563eb",
-              color: "#fff",
-              border: "none",
-              borderRadius: "8px",
-              cursor: refreshing ? "not-allowed" : "pointer",
-              fontWeight: "600",
-              display: "flex",
-              alignItems: "center",
-              gap: "6px",
-              opacity: refreshing ? 0.6 : 1,
-            }}
-          >
-            <RefreshCw size={16} style={{ animation: refreshing ? "spin 1s linear infinite" : "none" }} />
-            {refreshing ? "Đang cập nhật..." : "Cập nhật"}
-          </button>
         </div>
       </div>
 
@@ -1290,20 +850,18 @@ export default function PartnerPayment() {
 
       {/* Tabs */}
       <div style={styles.tabs}>
-        {["overview", "pending", "transactions", "withdraw"].map((tab) => (
+        {["overview", "transactions", "withdraw"].map((tab) => (
           <button
             key={tab}
             style={styles.tabBtn(activeTab === tab) as any}
             onClick={() =>
               setActiveTab(
-                tab as "overview" | "pending" | "transactions" | "withdraw"
+                tab as "overview" | "transactions" | "withdraw"
               )
             }
           >
             {tab === "overview"
               ? "📊 Tổng quan"
-              : tab === "pending"
-              ? `📋 Chờ duyệt (${pendingBookings.length})`
               : tab === "transactions"
               ? "📄 Giao dịch"
               : "💰 BANK"}
@@ -1379,156 +937,6 @@ export default function PartnerPayment() {
               ))
             )
             }
-          </div>
-        </div>
-      )}
-
-      {/* PENDING */}
-      {activeTab === "pending" && (
-        <div style={styles.overview}>
-          <h3>📋 Booking chờ duyệt</h3>
-
-          <div style={styles.bookingsList}>
-            {pendingBookings.length === 0 ? (
-              <p style={{ color: "#9ca3af", fontStyle: "italic" }}>Không có booking nào chờ duyệt.</p>
-            ) : (
-              pendingBookings.map((b) => {
-                const appliedFeePercent = b.feePercent !== undefined ? b.feePercent : feePercent;
-                const serviceFeeAmount = b.serviceFeeAmount ??
-                  ((b.finalTotal || b.totalPrice || 0) * (appliedFeePercent / 100));
-                const amountAfterFee = (b.totalPrice || 0) - serviceFeeAmount;
-
-                return (
-                  <div
-                    key={b._id}
-                    style={{
-                      padding: "16px",
-                      marginBottom: "12px",
-                      background: "#fef3c7",
-                      borderRadius: "12px",
-                      border: "2px solid #ca8a04",
-                    }}
-                  >
-                    <div
-                      style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        alignItems: "center",
-                        marginBottom: "12px",
-                      }}
-                    >
-                      <h4 style={{ margin: 0, color: "#111827", fontSize: "18px" }}>
-                        {b.hoTen || "Không rõ tên"}
-                      </h4>
-                      <span style={{
-                        padding: "4px 10px",
-                        background: "#fbbf24",
-                        color: "#92400e",
-                        borderRadius: "8px",
-                        fontSize: "12px",
-                        fontWeight: "600",
-                      }}>
-                        CHỜ DUYỆT
-                      </span>
-                    </div>
-
-                    <p style={{ margin: "4px 0", color: "#6b7280", fontSize: "13px" }}>
-                      📞 SĐT: <b>{b.sdt}</b>
-                    </p>
-
-                    <p style={{ margin: "4px 0", color: "#6b7280", fontSize: "13px" }}>
-                      🚌 Chuyến: <b>{b.tenChuyen}</b>
-                    </p>
-
-                    <p style={{ margin: "4px 0", color: "#6b7280", fontSize: "13px" }}>
-                      🎫 Ghế: <b>{b.soGhe?.join(", ")}</b>
-                    </p>
-
-                    <p style={{ margin: "4px 0", color: "#6b7280", fontSize: "13px" }}>
-                      🚀 Khởi hành: <b>{b.ngayKhoiHanh} - {b.gioKhoiHanh}</b>
-                    </p>
-
-                    <div
-                      style={{
-                        marginTop: "12px",
-                        padding: "10px",
-                        background: "#fff",
-                        borderRadius: "8px",
-                        border: "1px solid #ca8a04",
-                      }}
-                    >
-                      <p style={{ margin: "4px 0", color: "#111827", fontSize: "13px" }}>
-                        💵 Giá vé: <b>{formatCurrency(b.totalPrice || 0)}</b>
-                      </p>
-                      <p style={{ margin: "4px 0", color: "#111827", fontSize: "13px" }}>
-                        📌 Phí dịch vụ: <b style={{ color: "#d97706", fontSize: "16px" }}>{appliedFeePercent}%</b> =
-                        <b style={{ color: "#dc2626", marginLeft: "4px" }}>
-                          -{formatCurrency(serviceFeeAmount)}
-                        </b>
-                      </p>
-                      <p style={{ margin: "8px 0 0 0", color: "#15803d", fontSize: "13px", fontWeight: "bold", paddingTop: "8px", borderTop: "1px solid #fbbf24" }}>
-                        ✅ Nhận được: <b>{formatCurrency(amountAfterFee)}</b>
-                      </p>
-                    </div>
-
-                    <div
-                      style={{
-                        display: "flex",
-                        gap: "8px",
-                        marginTop: "12px",
-                      }}
-                    >
-                      <button
-                        style={{
-                          flex: 1,
-                          padding: "10px 16px",
-                          background: "#16a34a",
-                          color: "#fff",
-                          border: "none",
-                          borderRadius: "8px",
-                          cursor: approvingId === b._id ? "not-allowed" : "pointer",
-                          fontWeight: "600",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          gap: "6px",
-                          opacity: approvingId === b._id ? 0.6 : 1,
-                        }}
-                        onClick={() => handleApproveBooking(b._id)}
-                        disabled={approvingId === b._id}
-                      >
-                        <Check size={16} />
-                        {approvingId === b._id ? "Đang duyệt..." : "Duyệt"}
-                      </button>
-
-                      <button
-                        style={{
-                          flex: 1,
-                          padding: "10px 16px",
-                          background: "#dc2626",
-                          color: "#fff",
-                          border: "none",
-                          borderRadius: "8px",
-                          cursor: rejectingId === b._id ? "not-allowed" : "pointer",
-                          fontWeight: "600",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          gap: "6px",
-                          opacity: rejectingId === b._id ? 0.6 : 1,
-                        }}
-                        onClick={() => handleRejectBooking(b._id)}
-                        disabled={rejectingId === b._id}
-                      >
-                        <X size={16} />
-                        {rejectingId === b._id ? "Đang từ chối..." : "Từ chối"}
-                      </button>
-                    </div>
-                  </div>
-                );
-              })
-            )}
-        
           </div>
         </div>
       )}

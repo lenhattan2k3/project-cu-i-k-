@@ -3,8 +3,10 @@ import axios from "axios";
 const API_URL = "http://localhost:5000/api/trips";
 
 // ✅ Lấy tất cả chuyến xe
-export const getAllTrips = async () => {
-  const res = await axios.get(API_URL);
+export const getAllTrips = async (partnerId?: string) => {
+  const res = await axios.get(API_URL, {
+    params: partnerId ? { partnerId } : undefined,
+  });
   return res.data;
 };
 

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { socket } from "../../utils/socket";
 import { getNotificationsByRole } from "../../api/notificationsApi";
+import { auth } from "../../firebase/config";
 
 interface Notification {
   _id: string;
@@ -14,34 +15,39 @@ interface Notification {
 
 export default function UserNotifications() {
   const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [currentUserId, setCurrentUserId] = useState<string>("");
 
-  useEffect(() => {
-    const fetchNotifications = async () => {
-      try {
-        const data = await getNotificationsByRole("user");
-        setNotifications(data.reverse()); // Hiển thị mới nhất trước
-      } catch (error) {
-        console.error("Lỗi lấy thông báo:", error);
-      }
-    };
-    fetchNotifications();
+    useEffect(() => {
+      const unsubscribe = auth.onAuthStateChanged(async (user) => {
+        const uid = user?.uid || "";
+        setCurrentUserId(uid);
+        try {
+          const data = await getNotificationsByRole("user", uid ? { userId: uid } : undefined);
+          setNotifications(Array.isArray(data) ? data.reverse() : []);
+        } catch (error) {
+          console.error("Lỗi lấy thông báo:", error);
+        }
+      });
+      return () => unsubscribe();
+    }, []);
 
-    // 🟢 Nhận thông báo realtime từ socket
-    socket.on("receive_notification", (data: Notification) => {
-      console.log("📩 New notification for user:", data);
-      // Kiểm tra nếu thông báo dành cho user
-      if (
-        data.receivers &&
-        (data.receivers.includes("user") || data.receivers.includes("all"))
-      ) {
-        setNotifications((prev) => [data, ...prev]);
-      }
-    });
+    useEffect(() => {
+      const handleRealtime = (data: Notification) => {
+        if (!data?.receivers) return;
+        const forAll = data.receivers.includes("all");
+        const forUsers = data.receivers.includes("user");
+        const forMe = currentUserId ? data.receivers.includes(currentUserId) : false;
 
-    return () => {
-      socket.off("receive_notification");
-    };
-  }, []);
+        if (forAll || forUsers || forMe) {
+          setNotifications((prev) => [data, ...prev]);
+        }
+      };
+
+      socket.on("receive_notification", handleRealtime);
+      return () => {
+        socket.off("receive_notification", handleRealtime);
+      };
+    }, [currentUserId]);
 
   return (
     <div

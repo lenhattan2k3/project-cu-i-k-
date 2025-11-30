@@ -10,7 +10,12 @@ export default function UserComplaint() {
     if (!message.trim()) return alert("Vui lòng nhập nội dung!");
     setLoading(true);
     try {
-      await sendComplaint({ senderId: "user", receiverRole, message });
+      await sendComplaint({
+        senderId: "user",
+        senderRole: "user",
+        receiverRole,
+        message,
+      });
       alert("✅ Gửi khiếu nại thành công!");
       setMessage("");
     } catch (e) {

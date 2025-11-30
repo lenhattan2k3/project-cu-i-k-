@@ -38,6 +38,7 @@ export interface Booking {
   discountAmount?: number;
   finalTotal?: number;
   diemDonChiTiet?: string;
+  isFoodService?: boolean;
 }
 
 // ✅ UPDATED: Interface cho form modal
@@ -536,6 +537,38 @@ const handleSubmitReview = async (e: React.FormEvent) => {
                         </div>
                       )}
 
+                      {/* DỊCH VỤ ĂN UỐNG */}
+                      {ticket.isFoodService && (
+                        <div
+                          style={{
+                            background: "#fff7ed",
+                            border: "1px solid #fdba74",
+                            borderRadius: "10px",
+                            padding: "12px",
+                            marginBottom: "12px",
+                          }}
+                        >
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "8px",
+                            }}
+                          >
+                            <span style={{ fontSize: "16px" }}>🍱</span>
+                            <span
+                              style={{
+                                fontSize: "14px",
+                                fontWeight: 700,
+                                color: "#9a3412",
+                              }}
+                            >
+                              Dịch vụ ăn uống (+50.000đ)
+                            </span>
+                          </div>
+                        </div>
+                      )}
+
                       {/* TỔNG TIỀN & SỐ GHẾ */}
                       <div
                         style={{
@@ -561,7 +594,7 @@ const handleSubmitReview = async (e: React.FormEvent) => {
                           </span>
                         </div>
                         <div>
-                          {hasVoucher ? (
+                          {(hasVoucher || ticket.isFoodService) ? (
                             <div style={{ textAlign: "right" }}>
                               <div
                                 style={{
@@ -580,7 +613,7 @@ const handleSubmitReview = async (e: React.FormEvent) => {
                                   color: "#16a34a",
                                 }}
                               >
-                                {ticket.finalTotal?.toLocaleString("vi-VN")}đ
+                                {(ticket.finalTotal || ticket.totalPrice).toLocaleString("vi-VN")}đ
                               </div>
                             </div>
                           ) : (

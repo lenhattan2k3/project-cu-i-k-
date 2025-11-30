@@ -4,6 +4,7 @@ import { auth } from "../../firebase/config";
 import {
   getReviewByPartnerId,
   partnerReply,
+  deleteReview,
   type Review,
   type Message,
 } from "../../api/reviewApi";
@@ -21,8 +22,8 @@ const fmtDate = (d?: string | Date) =>
 // ---------- Component ----------
 export default function PartnerReview(): React.ReactElement {
   const [partnerId, setPartnerId] = useState<string>("");
-  const [partnerName, setPartnerName] = useState<string>("Nhà xe"); // Thêm state cho tên nhà xe
-  const [partnerAvatar, setPartnerAvatar] = useState<string>(""); // Thêm state cho avatar nhà xe
+  const [partnerName, setPartnerName] = useState<string>("Nhà xe");
+  const [partnerAvatar, setPartnerAvatar] = useState<string>("");
   const [avatarError, setAvatarError] = useState(false);
   
   const [reviews, setReviews] = useState<ReviewEx[]>([]);
@@ -32,12 +33,13 @@ export default function PartnerReview(): React.ReactElement {
   const [fileMap, setFileMap] = useState<Record<string, File | null>>({});
   const [previewMap, setPreviewMap] = useState<Record<string, string>>({});
   const [sendingMap, setSendingMap] = useState<Record<string, boolean>>({});
+  const [deletingMap, setDeletingMap] = useState<Record<string, boolean>>({});
 
   const mountedRef = useRef(true);
   const chatEndRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   // ----------------------------------------------------------------
-  // ----- TOÀN BỘ LOGIC STATE VÀ API ĐƯỢC GIỮ NGUYÊN HOÀN TOÀN -----
+  // ----- LOGIC STATE VÀ API ĐƯỢC GIỮ NGUYÊN -----
   // ----------------------------------------------------------------
 
   const scrollToBottom = (reviewId: string) => {
@@ -67,8 +69,8 @@ export default function PartnerReview(): React.ReactElement {
     const unsub = auth.onAuthStateChanged((u) => {
       const uid = u?.uid ?? "";
       setPartnerId(uid);
-      setPartnerName(u?.displayName || "Nhà xe"); // Lấy tên nhà xe
-      setPartnerAvatar(u?.photoURL || ""); // Lấy avatar nhà xe
+      setPartnerName(u?.displayName || "Nhà xe");
+      setPartnerAvatar(u?.photoURL || "");
       setAvatarError(false);
 
       if (uid) {
@@ -131,6 +133,26 @@ export default function PartnerReview(): React.ReactElement {
     clearFileState(id);
   };
 
+  const handleDeleteReview = async (reviewId: string) => {
+    const confirmed = window.confirm("Xoá hoàn toàn đánh giá này?");
+    if (!confirmed) return;
+
+    setDeletingMap((prev) => ({ ...prev, [reviewId]: true }));
+    try {
+      await deleteReview(reviewId);
+      setReviews((prev) => prev.filter((review) => review._id !== reviewId));
+    } catch (error) {
+      console.error(error);
+      alert("Không thể xoá đánh giá. Vui lòng thử lại.");
+    } finally {
+      setDeletingMap((prev) => {
+        const next = { ...prev };
+        delete next[reviewId];
+        return next;
+      });
+    }
+  };
+
   const sendMsg = async (reviewId: string) => {
     const text = (inputMap[reviewId] || "").trim();
     const file = fileMap[reviewId];
@@ -138,7 +160,7 @@ export default function PartnerReview(): React.ReactElement {
 
     const tempMessage: Message = {
       sender: "partner",
-      senderName: partnerName, // Dùng tên thật
+      senderName: partnerName,
       text,
       imageUrl: previewMap[reviewId] || undefined,
       createdAt: new Date().toISOString(),
@@ -191,97 +213,118 @@ export default function PartnerReview(): React.ReactElement {
   };
   
   // ----------------------------------------------------------------
-  // ----- BẮT ĐẦU PHẦN GIAO DIỆN (JSX) ĐÃ ĐƯỢC THIẾT KẾ LẠI -----
+  // ----- GIAO DIỆN ĐƯỢC THIẾT KẾ LẠI -----
   // ----------------------------------------------------------------
 
   if (!partnerId)
     return (
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh", background: "#F9FAFB" }}>
-        <div style={{ textAlign: "center" }}>
-          <div style={{ fontSize: "60px", marginBottom: "16px" }}>🔒</div>
-          <p style={{ color: "#6B7280", fontSize: "18px" }}>Vui lòng đăng nhập</p>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh", background: "#F3F4F6" }}>
+        <div style={{ textAlign: "center", padding: "40px", background: "white", borderRadius: "16px", boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.1)" }}>
+          <div style={{ fontSize: "48px", marginBottom: "16px" }}>🔐</div>
+          <h2 style={{ fontSize: "24px", fontWeight: "700", color: "#1F2937", marginBottom: "8px" }}>Yêu cầu đăng nhập</h2>
+          <p style={{ color: "#6B7280", fontSize: "16px" }}>Vui lòng đăng nhập tài khoản đối tác để xem đánh giá.</p>
         </div>
       </div>
     );
 
   return (
-    <div style={{ background: "#F9FAFB", padding: "24px", minHeight: "100vh" }}>
-      {/* Header */}
-      <div style={{ maxWidth: "1100px", margin: "0 auto 32px auto" }}>
-        <h1 style={{ fontSize: "28px", fontWeight: 700, color: "#111827", margin: 0 }}>
-          Đánh giá từ Khách hàng
+    <div style={{ background: "#F3F4F6", padding: "32px", minHeight: "100vh", fontFamily: "'Inter', sans-serif" }}>
+      {/* Page Header */}
+      <div style={{ maxWidth: "1200px", margin: "0 auto 24px auto" }}>
+        <h1 style={{ fontSize: "30px", fontWeight: 800, color: "#111827", margin: 0, letterSpacing: "-0.025em" }}>
+          Đánh giá & Phản hồi
         </h1>
         <p style={{ fontSize: "16px", color: "#6B7280", marginTop: "8px" }}>
-          Quản lý và phản hồi các đánh giá của khách.
+          Xem và trả lời các đánh giá từ khách hàng của bạn.
         </p>
       </div>
 
-      {/* Loading / Empty States */}
+      {/* Content Area */}
       {loading ? (
-        <div style={{ textAlign: "center", padding: "40px" }}>Đang tải dữ liệu...</div>
+        <div style={{ textAlign: "center", padding: "60px" }}>
+          <div className="animate-spin" style={{ display: "inline-block", width: "32px", height: "32px", border: "3px solid #E5E7EB", borderTopColor: "#3B82F6", borderRadius: "50%" }}></div>
+          <p style={{ marginTop: "16px", color: "#6B7280" }}>Đang tải dữ liệu...</p>
+        </div>
       ) : reviews.length === 0 ? (
-        <div style={{ background: "white", border: "1px solid #e5e7eb", borderRadius: 12, padding: "48px", maxWidth: 720, margin: "30px auto", textAlign: "center" }}>
-          <div style={{ fontSize: "60px", marginBottom: "16px" }}>📭</div>
-          <h3 style={{ margin: 0, fontSize: "18px", fontWeight: 700, color: "#374151" }}>Chưa có đánh giá nào</h3>
-          <p style={{ marginTop: 8, color: "#6b7280" }}>Khi khách hàng đánh giá, chúng sẽ hiển thị ở đây.</p>
+        <div style={{ background: "white", borderRadius: "16px", padding: "60px", maxWidth: "600px", margin: "40px auto", textAlign: "center", boxShadow: "0 1px 3px 0 rgba(0, 0, 0, 0.1)" }}>
+          <div style={{ fontSize: "64px", marginBottom: "20px" }}>📝</div>
+          <h3 style={{ fontSize: "20px", fontWeight: 700, color: "#111827", marginBottom: "8px" }}>Chưa có đánh giá nào</h3>
+          <p style={{ color: "#6B7280" }}>Hiện tại chưa có khách hàng nào để lại đánh giá cho dịch vụ của bạn.</p>
         </div>
       ) : (
-        
-        // List of Reviews
-        <div style={{ display: "flex", flexDirection: "column", gap: "32px", maxWidth: "1100px", margin: "0 auto" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: "24px", maxWidth: "1200px", margin: "0 auto" }}>
           {reviews.map((r: ReviewEx) => {
-            if (!r) return null;
-            const id = r._id!;
-            if (!id) return null;
-
+            if (!r || !r._id) return null;
+            const id = r._id;
             const messages = r.messages || [];
             const sending = sendingMap[id] || false;
 
             return (
-              // Card 2 cột
-              <div
-                key={id}
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "320px 1fr",
-                  background: "white",
-                  borderRadius: "16px",
-                  boxShadow: "0 4px 12px rgba(0,0,0,0.05)",
-                  border: "1px solid #E5E7EB",
-                  overflow: "hidden"
-                }}
-              >
-                {/* -------------------- */}
-                {/* CỘT BÊN TRÁI (INFO) */}
-                {/* -------------------- */}
-                <div style={{ padding: "24px", borderRight: "1px solid #E5E7EB", background: "#F9FAFB" }}>
-                  <h3 style={{ fontSize: "18px", fontWeight: 600, color: "#111827", marginTop: 0, marginBottom: "12px" }}>
-                    {r.tenChuyen || "Chuyến xe"}
-                  </h3>
+              <div key={id} style={{ 
+                position: "relative",
+                display: "grid", 
+                gridTemplateColumns: "300px 1fr", 
+                background: "white", 
+                borderRadius: "16px", 
+                boxShadow: "0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06)",
+                border: "1px solid #E5E7EB",
+                overflow: "hidden",
+                minHeight: "400px"
+              }}>
+
+                <button
+                  onClick={() => handleDeleteReview(id)}
+                  disabled={deletingMap[id]}
+                  style={{
+                    position: "absolute",
+                    top: "16px",
+                    right: "16px",
+                    border: "none",
+                    borderRadius: "999px",
+                    padding: "6px 14px",
+                    background: deletingMap[id] ? "#F87171" : "#DC2626",
+                    color: "white",
+                    fontWeight: 600,
+                    fontSize: "12px",
+                    letterSpacing: "0.02em",
+                    cursor: deletingMap[id] ? "not-allowed" : "pointer",
+                    boxShadow: "0 4px 10px rgba(220,38,38,0.25)",
+                  }}
+                >
+                  {deletingMap[id] ? "Đang xoá..." : "Xoá đánh giá"}
+                </button>
+                
+                {/* LEFT COLUMN: REVIEW DETAILS */}
+                <div style={{ padding: "24px", borderRight: "1px solid #F3F4F6", background: "#FAFAFA" }}>
+                  <div style={{ marginBottom: "20px" }}>
+                    <span style={{ fontSize: "12px", fontWeight: "600", color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.05em" }}>Chuyến xe</span>
+                    <h3 style={{ fontSize: "18px", fontWeight: 700, color: "#111827", margin: "4px 0 0 0", lineHeight: "1.4" }}>
+                      {r.tenChuyen || "Chuyến đi không tên"}
+                    </h3>
+                  </div>
                   
-                  {/* Rating */}
-                  <StarRating rating={r.rating ?? 0} />
+                  <div style={{ marginBottom: "24px" }}>
+                    <StarRating rating={r.rating ?? 0} />
+                  </div>
                   
-                  <hr style={{ border: "none", borderTop: "1px solid #E5E7EB", margin: "20px 0" }} />
-                  
-                  {/* Thông tin chi tiết */}
                   <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-                    <DetailRow label="Khách hàng" value={r.hoTen} />
-                    <DetailRow label="Số điện thoại" value={r.sdt} />
-                    <DetailRow label="Số ghế" value={(r.soGhe || []).join(", ") || "—"} />
-                    <DetailRow label="Tổng tiền" value={`${r.totalPrice?.toLocaleString("vi-VN") || 0}đ`} />
+                    <DetailItem label="Khách hàng" value={r.hoTen || "Ẩn danh"} icon="👤" />
+                    <DetailItem label="Số điện thoại" value={r.sdt || "---"} icon="📞" />
+                    <DetailItem label="Số ghế" value={(r.soGhe || []).join(", ") || "---"} icon="💺" />
+                    <DetailItem label="Tổng tiền" value={r.totalPrice ? `${r.totalPrice.toLocaleString("vi-VN")}đ` : "---"} icon="💰" />
                   </div>
                 </div>
                 
-                {/* --------------------- */}
-                {/* CỘT BÊN PHẢI (CHAT) */}
-                {/* --------------------- */}
-                <div style={{ display: "flex", flexDirection: "column", maxHeight: "700px" }}>
+                {/* RIGHT COLUMN: CONVERSATION */}
+                <div style={{ display: "flex", flexDirection: "column", height: "100%", maxHeight: "600px" }}>
                   
-                  {/* Khu vực scroll tin nhắn */}
-                  <div style={{ flex: 1, overflowY: "auto", padding: "24px", display: "flex", flexDirection: "column", gap: "20px" }}>
+                  {/* Chat History */}
+                  <div style={{ flex: 1, overflowY: "auto", padding: "24px", display: "flex", flexDirection: "column", gap: "20px", background: "#FFFFFF" }}>
                     {messages.length === 0 ? (
-                       <div style={{ color: "#9CA3AF", textAlign: "center", paddingTop: "40px" }}>Chưa có tin nhắn nào.</div>
+                      <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", color: "#9CA3AF", opacity: 0.8 }}>
+                        <div style={{ fontSize: "40px", marginBottom: "12px" }}>💬</div>
+                        <p>Chưa có nội dung phản hồi.</p>
+                      </div>
                     ) : (
                       messages.map((m: Message, i: number) => {
                         const isPartner = m.sender === "partner";
@@ -290,90 +333,101 @@ export default function PartnerReview(): React.ReactElement {
                         return (
                           <ChatBubble
                             key={key}
-                            isUser={!isPartner} // "User" ở đây là khách hàng
-                            avatar={isPartner ? partnerAvatar : undefined} // Chỉ nhà xe mới có avatar
+                            isUser={!isPartner}
+                            avatar={isPartner ? partnerAvatar : undefined}
                             avatarError={avatarError}
                             setAvatarError={setAvatarError}
                             name={m.senderName || (isPartner ? partnerName : "Khách hàng")}
                             date={fmtDate(m.createdAt)}
                             text={m.text}
                             imageUrl={m.imageUrl}
-                            // Thêm rating cho tin nhắn đầu tiên của khách
                             rating={i === 0 && !isPartner ? r.rating : undefined} 
                           />
                         );
                       })
                     )}
-                    <div ref={(el: HTMLDivElement | null) => { chatEndRefs.current[id] = el; }} />
+                    <div ref={(el) => { chatEndRefs.current[id] = el; }} />
                   </div>
 
-                  {/* Khu vực Input */}
-                  <div style={{ borderTop: "1px solid #E5E7EB", padding: "16px", background: "#F9FAFB" }}>
-                    <textarea
-                      value={inputMap[id] || ""}
-                      onChange={(e) => setInputMap((p) => ({ ...p, [id]: e.target.value }))}
-                      placeholder="Nhập phản hồi của bạn..."
-                      disabled={sending}
-                      style={{
-                        width: "100%", minHeight: "80px", padding: "12px 16px", borderRadius: "8px",
-                        border: "1px solid #D1D5DB", boxSizing: "border-box", resize: "vertical",
-                        fontSize: "14px", boxShadow: "0 1px 2px rgba(0,0,0,0.05)"
-                      }}
-                    />
-                    
-                    {/* Preview ảnh */}
-                    {previewMap[id] && (
-                       <div style={{ marginTop: "12px", position: "relative", display: "inline-block" }}>
-                         <img src={previewMap[id]} alt="preview" style={{ width: "100px", height: "100px", objectFit: "cover", borderRadius: "8px", border: "1px solid #E5E7EB" }} />
-                         <button 
-                           onClick={() => removeFile(id)} 
-                           disabled={sending}
-                           style={{
-                              position: "absolute", top: "-8px", right: "-8px", background: "#EF4444", color: "white",
-                              borderRadius: "50%", width: "24px", height: "24px", border: "none", cursor: "pointer",
-                              fontSize: "16px", display: "flex", alignItems: "center", justifyContent: "center"
-                           }}>
-                           ×
-                         </button>
-                       </div>
-                    )}
-                    
-                    {/* Dòng button */}
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "12px" }}>
-                      {/* Nút đính kèm file */}
-                      <label 
-                        htmlFor={`file-partner-${id}`} 
-                        style={{ 
-                          cursor: sending ? "not-allowed" : "pointer",
-                          padding: "8px",
-                          borderRadius: "6px"
-                        }}
-                        title="Đính kèm ảnh"
-                      >
-                        <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
-                          <path d="M17.5 10.625V13.125C17.5 15.334 15.834 17.0833 13.75 17.0833C11.666 17.0833 10 15.334 10 13.125V6.875C10 5.54167 8.95833 4.5 7.70833 4.5C6.45833 4.5 5.41667 5.54167 5.41667 6.875V12.5C5.41667 13.125 5.875 13.75 6.45833 13.75C7.04167 13.75 7.5 13.125 7.5 12.5V7.5H8.75V12.5C8.75 13.875 7.75 15 6.45833 15C5.16667 15 4.16667 13.875 4.16667 12.5V6.875C4.16667 4.875 5.75 3.20833 7.70833 3.20833C9.66667 3.20833 11.25 4.875 11.25 6.875V13.125C11.25 16.0417 13.9583 18.3333 16.25 18.3333C18.5417 18.3333 20 16.0417 20 13.125V10.625H17.5Z" fill={sending ? "#9CA3AF" : "#6B7280"}/>
-                        </svg>
-                      </label>
-                      <input id={`file-partner-${id}`} type="file" accept="image/*" onChange={(e) => handleFile(e, id)} disabled={sending} style={{ display: "none" }} />
+                  {/* Input Area */}
+                  <div style={{ padding: "16px 24px", borderTop: "1px solid #F3F4F6", background: "#FAFAFA" }}>
+                    <div style={{ position: "relative" }}>
+                      {previewMap[id] && (
+                        <div style={{ position: "absolute", bottom: "100%", left: 0, marginBottom: "12px", background: "white", padding: "8px", borderRadius: "12px", boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.1)", border: "1px solid #E5E7EB" }}>
+                          <img src={previewMap[id]} alt="preview" style={{ width: "80px", height: "80px", objectFit: "cover", borderRadius: "8px" }} />
+                          <button 
+                            onClick={() => removeFile(id)} 
+                            style={{ position: "absolute", top: "-8px", right: "-8px", background: "#EF4444", color: "white", borderRadius: "50%", width: "24px", height: "24px", border: "2px solid white", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "14px", fontWeight: "bold" }}
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      )}
                       
-                      {/* Nút gửi */}
-                      <button
-                        onClick={() => sendMsg(id)}
-                        disabled={sending || (!(inputMap[id] || "").trim() && !fileMap[id])}
-                        style={{
-                          padding: "10px 16px",
-                          fontSize: "14px",
-                          fontWeight: 600,
-                          color: "white",
-                          background: sending ? "#9CA3AF" : "#2563EB",
-                          border: "none",
-                          borderRadius: "8px",
-                          cursor: (sending || (!inputMap[id]?.trim() && !fileMap[id])) ? "not-allowed" : "pointer",
-                          opacity: (sending || (!inputMap[id]?.trim() && !fileMap[id])) ? 0.7 : 1
-                        }}
-                      >
-                        {sending ? "Đang gửi..." : "Gửi Phản hồi"}
-                      </button>
+                      <div style={{ display: "flex", gap: "12px", alignItems: "flex-end" }}>
+                        <label 
+                          htmlFor={`file-partner-${id}`} 
+                          style={{ 
+                            cursor: sending ? "not-allowed" : "pointer",
+                            padding: "10px",
+                            borderRadius: "10px",
+                            background: "#F3F4F6",
+                            color: "#6B7280",
+                            display: "flex", alignItems: "center", justifyContent: "center",
+                            transition: "all 0.2s"
+                          }}
+                          title="Đính kèm ảnh"
+                        >
+                          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
+                        </label>
+                        <input id={`file-partner-${id}`} type="file" accept="image/*" onChange={(e) => handleFile(e, id)} disabled={sending} style={{ display: "none" }} />
+                        
+                        <textarea
+                          value={inputMap[id] || ""}
+                          onChange={(e) => setInputMap((p) => ({ ...p, [id]: e.target.value }))}
+                          placeholder="Nhập nội dung phản hồi..."
+                          disabled={sending}
+                          style={{
+                            flex: 1,
+                            minHeight: "44px",
+                            maxHeight: "120px",
+                            padding: "12px 16px",
+                            borderRadius: "12px",
+                            border: "1px solid #E5E7EB",
+                            fontSize: "14px",
+                            lineHeight: "1.5",
+                            resize: "none",
+                            outline: "none",
+                            background: "white",
+                            boxShadow: "0 1px 2px 0 rgba(0, 0, 0, 0.05)"
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' && !e.shiftKey) {
+                              e.preventDefault();
+                              sendMsg(id);
+                            }
+                          }}
+                        />
+                        
+                        <button
+                          onClick={() => sendMsg(id)}
+                          disabled={sending || (!(inputMap[id] || "").trim() && !fileMap[id])}
+                          style={{
+                            padding: "10px 20px",
+                            borderRadius: "10px",
+                            border: "none",
+                            background: sending ? "#9CA3AF" : "#2563EB",
+                            color: "white",
+                            fontWeight: 600,
+                            fontSize: "14px",
+                            cursor: (sending || (!inputMap[id]?.trim() && !fileMap[id])) ? "not-allowed" : "pointer",
+                            transition: "background 0.2s",
+                            height: "44px"
+                          }}
+                        >
+                          {sending ? "..." : "Gửi"}
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -386,31 +440,31 @@ export default function PartnerReview(): React.ReactElement {
   );
 }
 
-// ---------- Component con ----------
+// ---------- Sub-components ----------
 
-// Component render chi tiết (Khách hàng, SĐT...)
-const DetailRow = ({ label, value }: { label: string; value: React.ReactNode }) => (
-  <div>
-    <div style={{ fontSize: "13px", color: "#6B7280", marginBottom: "4px" }}>{label}</div>
-    <div style={{ fontWeight: 600, color: "#1F2937", fontSize: "14px" }}>{value}</div>
+const DetailItem = ({ label, value, icon }: { label: string; value: React.ReactNode; icon: string }) => (
+  <div style={{ display: "flex", alignItems: "flex-start", gap: "10px" }}>
+    <span style={{ fontSize: "16px", lineHeight: "1" }}>{icon}</span>
+    <div>
+      <div style={{ fontSize: "12px", color: "#6B7280", marginBottom: "2px" }}>{label}</div>
+      <div style={{ fontSize: "14px", fontWeight: 600, color: "#1F2937" }}>{value}</div>
+    </div>
   </div>
 );
 
-// Component render sao
 const StarRating = ({ rating }: { rating: number }) => (
-  <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-    {Array.from({ length: 5 }, (_, idx) => (
-      <span key={idx} style={{ fontSize: "20px", color: idx < rating ? "#FBBF24" : "#D1D5DB" }}>
-        ★
-      </span>
-    ))}
-    <span style={{ marginLeft: "8px", fontSize: "14px", fontWeight: 600, color: "#374151" }}>
-      {rating}/5
-    </span>
+  <div style={{ display: "inline-flex", alignItems: "center", background: "#FFF7ED", padding: "6px 12px", borderRadius: "8px", border: "1px solid #FED7AA" }}>
+    <div style={{ display: "flex", gap: "2px", marginRight: "8px" }}>
+      {Array.from({ length: 5 }, (_, idx) => (
+        <svg key={idx} width="16" height="16" viewBox="0 0 24 24" fill={idx < rating ? "#F59E0B" : "none"} stroke={idx < rating ? "#F59E0B" : "#D1D5DB"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+        </svg>
+      ))}
+    </div>
+    <span style={{ fontSize: "14px", fontWeight: 700, color: "#9A3412" }}>{rating}.0</span>
   </div>
 );
 
-// Component render 1 bong bóng chat (Giống hệt file Review.tsx)
 function ChatBubble({ isUser, avatar, avatarError, setAvatarError, name, date, text, rating, imageUrl }: 
   { 
     isUser: boolean;
@@ -424,79 +478,78 @@ function ChatBubble({ isUser, avatar, avatarError, setAvatarError, name, date, t
     imageUrl?: string;
   }) {
   
-  const align = isUser ? "flex-start" : "flex-end"; // Đảo ngược: user (khách) bên trái, partner (nhà xe) bên phải
-  const avatarBg = isUser ? "#E0E7FF" : "#DBEAFE"; // Tím nhạt (User) / Xanh nhạt (Partner)
-  const avatarColor = isUser ? "#4338CA" : "#1E40AF";
-  const bubbleBg = isUser ? "#F3F4F6" : "white"; // Xám nhạt (User) / Trắng (Partner)
-  
+  const bubbleStyle = isUser 
+    ? { bg: "#F3F4F6", color: "#1F2937", border: "1px solid #E5E7EB", align: "flex-start" }
+    : { bg: "#EFF6FF", color: "#1E3A8A", border: "1px solid #DBEAFE", align: "flex-end" };
+
   return (
-    <div style={{ display: "flex", alignItems: "flex-start", gap: "12px", alignSelf: align, flexDirection: isUser ? "row" : "row-reverse" }}>
-      {/* Avatar */}
-      <div style={{
-        width: "36px", height: "36px", borderRadius: "50%",
-        background: avatarBg,
-        display: "flex", alignItems: "center", justifyContent: "center",
-        fontSize: "16px", fontWeight: 600, color: avatarColor,
-        overflow: "hidden", flexShrink: 0
-      }}>
-        {isUser ? (
-          // Khách hàng (User) - không có avatar, chỉ có chữ cái đầu
-          (name.charAt(0) || "K").toUpperCase()
-        ) : (
-          // Nhà xe (Partner) - có avatar
-          (avatar && !avatarError) ? (
-            <img src={avatar} alt="Nhà xe" style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={() => setAvatarError && setAvatarError(true)} />
+    <div style={{ display: "flex", flexDirection: "column", alignItems: bubbleStyle.align, width: "100%" }}>
+      <div style={{ display: "flex", gap: "12px", flexDirection: isUser ? "row" : "row-reverse", maxWidth: "85%" }}>
+        {/* Avatar */}
+        <div style={{
+          width: "32px", height: "32px", borderRadius: "50%",
+          background: isUser ? "#E5E7EB" : "#BFDBFE",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          fontSize: "14px", fontWeight: 700, color: isUser ? "#4B5563" : "#1D4ED8",
+          overflow: "hidden", flexShrink: 0, border: "1px solid white", boxShadow: "0 1px 2px rgba(0,0,0,0.1)"
+        }}>
+          {isUser ? (
+            (name.charAt(0) || "K").toUpperCase()
           ) : (
-            (name.charAt(0) || "N").toUpperCase()
-          )
-        )}
-      </div>
-      
-      {/* Nội dung tin nhắn */}
-      <div style={{ 
-        background: bubbleBg,
-        border: "1px solid #E5E7EB",
-        borderRadius: "12px",
-        padding: "12px 16px",
-        maxWidth: "450px"
-      }}>
-        {/* Header (Tên + Ngày) */}
-        <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "8px" }}>
-          <span style={{ fontWeight: 600, fontSize: "14px", color: "#1F2937" }}>{name}</span>
-          <span style={{ fontSize: "12px", color: "#9CA3AF" }}>{date}</span>
+            (avatar && !avatarError) ? (
+              <img src={avatar} alt="Avatar" style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={() => setAvatarError && setAvatarError(true)} />
+            ) : (
+              (name.charAt(0) || "N").toUpperCase()
+            )
+          )}
         </div>
-        
-        {/* Rating (nếu có) */}
-        {rating && rating > 0 && (
-          <div style={{ display: "flex", gap: "2px", marginBottom: "8px" }}>
-            {Array.from({ length: 5 }, (_, idx) => (
-              <span key={idx} style={{ fontSize: "16px", color: idx < rating ? "#FBBF24" : "#D1D5DB" }}>★</span>
-            ))}
+
+        <div style={{ display: "flex", flexDirection: "column", alignItems: bubbleStyle.align }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px", fontSize: "12px" }}>
+            <span style={{ fontWeight: 600, color: "#374151" }}>{name}</span>
+            <span style={{ color: "#9CA3AF" }}>{date}</span>
           </div>
-        )}
-        
-        {/* Text (nếu có) */}
-        {text && (
-          <p style={{ fontSize: "14px", color: "#374151", margin: 0, whiteSpace: "pre-wrap" }}>
-            {text}
-          </p>
-        )}
-        
-        {/* Ảnh (nếu có) */}
-        {imageUrl && (
-          <img 
-            src={imageUrl} 
-            alt="Attachment" 
-            style={{
-              marginTop: text ? "12px" : 0,
-              borderRadius: "8px",
-              maxWidth: "100%",
-              maxHeight: "250px",
-              objectFit: "cover",
-              border: "1px solid #E5E7EB"
-            }} 
-          />
-        )}
+
+          <div style={{ 
+            background: bubbleStyle.bg,
+            border: bubbleStyle.border,
+            borderRadius: isUser ? "0 12px 12px 12px" : "12px 0 12px 12px",
+            padding: "12px 16px",
+            boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
+            position: "relative"
+          }}>
+            {rating && rating > 0 && (
+              <div style={{ display: "flex", gap: "2px", marginBottom: "8px" }}>
+                {Array.from({ length: 5 }, (_, idx) => (
+                  <span key={idx} style={{ fontSize: "14px", color: idx < rating ? "#F59E0B" : "#D1D5DB" }}>★</span>
+                ))}
+              </div>
+            )}
+            
+            {text && (
+              <p style={{ fontSize: "14px", color: "#1F2937", margin: 0, whiteSpace: "pre-wrap", lineHeight: "1.5" }}>
+                {text}
+              </p>
+            )}
+            
+            {imageUrl && (
+              <div style={{ marginTop: text ? "12px" : 0 }}>
+                <img 
+                  src={imageUrl} 
+                  alt="Gửi kèm" 
+                  style={{
+                    borderRadius: "8px",
+                    maxWidth: "100%",
+                    maxHeight: "200px",
+                    objectFit: "cover",
+                    border: "1px solid rgba(0,0,0,0.1)",
+                    display: "block"
+                  }} 
+                />
+              </div>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );

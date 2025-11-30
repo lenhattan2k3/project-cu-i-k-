@@ -9,7 +9,12 @@ export default function PartnerComplaint() {
     if (!message.trim()) return;
     setLoading(true);
     try {
-      await sendComplaint({ senderId: "partner", receiverRole: "admin", message });
+      await sendComplaint({
+        senderId: "partner",
+        senderRole: "partner",
+        receiverRole: "admin",
+        message,
+      });
       alert("✅ Gửi khiếu nại thành công!");
       setMessage("");
     } catch (e) {

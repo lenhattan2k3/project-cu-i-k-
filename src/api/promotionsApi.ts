@@ -3,10 +3,12 @@ import axios from "axios";
 // 🔹 URL gốc backend
 const API_URL = "http://localhost:5000/api/promotions";
 
-// 🟢 [GET] Lấy tất cả mã giảm giá
-export const getPromotions = async () => {
+// 🟢 [GET] Lấy tất cả mã giảm giá (có thể lọc theo nhà xe)
+export const getPromotions = async (partnerId?: string) => {
   try {
-    const res = await axios.get(API_URL);
+    const res = await axios.get(API_URL, {
+      params: partnerId ? { partnerId } : undefined,
+    });
     return res.data; // Trả về mảng promotions
   } catch (err: any) {
     console.error("❌ Lỗi khi lấy danh sách khuyến mãi:", err.response?.data || err.message);
@@ -27,10 +29,29 @@ export const createPromotion = async (promotionData: FormData) => {
   }
 };
 
+export const generatePromotionPreview = async (payload: {
+  code: string;
+  discountType: "percentage" | "amount";
+  discountValue: number;
+  maxUsage: number;
+  startDate: string;
+  endDate: string;
+  description: string;
+  partnerName: string;
+  autoImage: boolean;
+  autoDescription: boolean;
+  descriptionHint: string;
+}) => {
+  const res = await axios.post(`${API_URL}/preview`, payload);
+  return res.data;
+};
+
 // 🗑️ [DELETE] Xóa khuyến mãi theo ID
-export const deletePromotion = async (id: string) => {
+export const deletePromotion = async (id: string, partnerId?: string) => {
   try {
-    const res = await axios.delete(`${API_URL}/${id}`);
+    const res = await axios.delete(`${API_URL}/${id}`, {
+      params: partnerId ? { partnerId } : undefined,
+    });
     return res.data; // { message: "✅ Xóa khuyến mãi thành công" }
   } catch (err: any) {
     console.error("❌ Lỗi khi xóa khuyến mãi:", err.response?.data || err.message);
@@ -38,9 +59,17 @@ export const deletePromotion = async (id: string) => {
   }
 };
 // 🎟️ [POST] Áp dụng mã khuyến mãi
-export const applyPromotion = async (code: string, totalAmount: number) => {
+export const applyPromotion = async (
+  code: string,
+  totalAmount: number,
+  partnerId: string
+) => {
   try {
-    const res = await axios.post(`${API_URL}/apply`, { code, totalAmount });
+    const res = await axios.post(`${API_URL}/apply`, {
+      code,
+      totalAmount,
+      partnerId,
+    });
     return res.data; 
     // Trả về: { message, code, discount, newTotal }
   } catch (err: any) {

@@ -1,9 +1,13 @@
-import React, { useState } from "react";
+import { useState, useEffect, useRef } from "react";
+import axios from "axios";
+import { getAuth, onAuthStateChanged } from "firebase/auth";
 import {
   ShoppingCart,
   Users,
   Star,
   Ticket,
+  Armchair,
+  BadgeDollarSign,
 } from "lucide-react";
 import {
   LineChart,
@@ -19,54 +23,194 @@ import {
   ResponsiveContainer,
 } from "recharts";
 
+interface Stats {
+  totalOrders: number;
+  totalCustomers: number;
+  totalTickets: number;
+  avgRating: number;
+  totalRevenue: number;
+  totalEmptySeats: number;
+  totalPoints: number;
+}
+
+interface RevenueData {
+  label: string;
+  revenue: number;
+  tickets: number;
+}
+
+interface OrderStatusData {
+  name: string;
+  value: number;
+  color: string;
+  [key: string]: any;
+}
+
+interface RecentOrder {
+  id: string;
+  customer: string;
+  route: string;
+  amount: number;
+  status: string;
+}
+
+interface TopRoute {
+  route: string;
+  tickets: number;
+  revenue: number;
+}
+
+interface AppliedFilter {
+  period: string;
+  start: string | null;
+  end: string | null;
+}
+
+type PeriodFilter = "all" | "day" | "month" | "year";
+
+const defaultStats: Stats = {
+  totalOrders: 0,
+  totalCustomers: 0,
+  totalTickets: 0,
+  avgRating: 0,
+  totalRevenue: 0,
+  totalEmptySeats: 0,
+  totalPoints: 0,
+};
+
+interface LoyaltyLeader {
+  userId: string;
+  name: string;
+  points: number;
+}
+
 export default function BusTicketDashboard() {
-  const [selectedPeriod, setSelectedPeriod] = useState("month");
+  const [loading, setLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const stats = {
-    totalOrders: 1247,
-    totalCustomers: 856,
-    totalTickets: 3421,
-    avgRating: 4.7,
-    totalRevenue: 245680000,
-  };
+  const [stats, setStats] = useState<Stats>(defaultStats);
 
-  const revenueData = [
-    { month: "T1", revenue: 18500000, tickets: 245 },
-    { month: "T2", revenue: 21200000, tickets: 298 },
-    { month: "T3", revenue: 19800000, tickets: 267 },
-    { month: "T4", revenue: 23400000, tickets: 312 },
-    { month: "T5", revenue: 25100000, tickets: 334 },
-    { month: "T6", revenue: 22900000, tickets: 289 },
-    { month: "T7", revenue: 26800000, tickets: 356 },
-    { month: "T8", revenue: 24300000, tickets: 318 },
-    { month: "T9", revenue: 21700000, tickets: 285 },
-    { month: "T10", revenue: 23900000, tickets: 301 },
-    { month: "T11", revenue: 20180000, tickets: 273 },
-    { month: "T12", revenue: 18000000, tickets: 243 },
-  ];
+  const [revenueData, setRevenueData] = useState<RevenueData[]>([]);
+  const [orderStatusData, setOrderStatusData] = useState<OrderStatusData[]>([]);
+  const [recentOrders, setRecentOrders] = useState<RecentOrder[]>([]);
+  const [topRoutes, setTopRoutes] = useState<TopRoute[]>([]);
+  const [period, setPeriod] = useState<PeriodFilter>("all");
+  const [selectedDay, setSelectedDay] = useState(() => new Date().toISOString().split("T")[0]);
+  const [selectedMonth, setSelectedMonth] = useState(() => new Date().toISOString().slice(0, 7));
+  const [selectedYear, setSelectedYear] = useState(() => new Date().getFullYear().toString());
+  const [appliedFilter, setAppliedFilter] = useState<AppliedFilter | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const initialLoadRef = useRef(true);
+  const [partnerId, setPartnerId] = useState<string | null>(null);
+  const [authChecked, setAuthChecked] = useState(false);
+  const [loyaltyLeaders, setLoyaltyLeaders] = useState<LoyaltyLeader[]>([]);
 
-  const orderStatusData = [
-    { name: "Hoàn tất", value: 856, color: "#4ade80" },
-    { name: "Đang vận chuyển", value: 142, color: "#1e293b" },
-    { name: "Huỷ bỏ", value: 89, color: "#fb923c" },
-    { name: "Hoàn tất", value: 160, color: "#60a5fa" },
-  ];
+  useEffect(() => {
+    const auth = getAuth();
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      setPartnerId(user?.uid ?? null);
+      initialLoadRef.current = true;
+      setLoading(true);
 
-  const recentOrders = [
-    { id: "VX001", customer: "LÊ NHẬT TÂN", route: "Hà Nội - Hải Phòng", amount: 250000, status: "Đã thanh toán" },
-    { id: "VX002", customer: "THÁI VĂN TIÊN ", route: "TP.HCM - Vũng Tàu", amount: 180000, status: "Đã thanh toán" },
-    { id: "VX003", customer: "MAI VĂN QUỐC ", route: "Đà Nẵng - Huế", amount: 150000, status: "Chờ xác nhận" },
-    { id: "VX004", customer: "CAPTAIN TIÊN", route: "Hà Nội - Thanh Hóa", amount: 200000, status: "Đã thanh toán" },
-    { id: "VX005", customer: "MENTOR Quốc", route: "TP.HCM - Đà Lạt", amount: 320000, status: "Đã huỷ" },
-  ];
+      if (!user) {
+        setStats(defaultStats);
+        setRevenueData([]);
+        setOrderStatusData([]);
+        setRecentOrders([]);
+        setTopRoutes([]);
+        setLoyaltyLeaders([]);
+      }
 
-  const topRoutes = [
-    { route: "TP.HCM - Vũng Tàu", tickets: 456, revenue: 82080000 },
-    { route: "Hà Nội - Hải Phòng", tickets: 398, revenue: 99500000 },
-    { route: "TP.HCM - Đà Lạt", tickets: 367, revenue: 117440000 },
-    { route: "Đà Nẵng - Huế", tickets: 312, revenue: 46800000 },
-    { route: "Hà Nội - Ninh Bình", tickets: 289, revenue: 52020000 },
-  ];
+      setAuthChecked(true);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    if (!authChecked) return;
+
+    if (!partnerId) {
+      setLoading(false);
+      setErrorMessage("Vui lòng đăng nhập bằng tài khoản nhà xe để xem thống kê.");
+      return;
+    }
+
+    const fetchReport = async () => {
+      const isInitialLoad = initialLoadRef.current;
+      try {
+        if (!isInitialLoad) {
+          setRefreshing(true);
+        }
+        setErrorMessage(null);
+        const apiBase = import.meta.env.VITE_API_URL ?? "http://localhost:5000";
+        const endpoint = `${apiBase}/api/stats/report/${partnerId}`;
+
+        const params = new URLSearchParams();
+        if (period !== "all") {
+          params.append("period", period);
+          const dateValue =
+            period === "day"
+              ? selectedDay
+              : period === "month"
+              ? selectedMonth
+              : selectedYear;
+          if (dateValue) {
+            params.append("date", dateValue);
+          }
+        }
+        const url = params.toString() ? `${endpoint}?${params.toString()}` : endpoint;
+
+        const res = await axios.get(url);
+        if (res.data.success) {
+          setStats(res.data.stats);
+          setRevenueData(res.data.revenueData || []);
+          setOrderStatusData(res.data.orderStatusData || []);
+          setRecentOrders(res.data.recentOrders || []);
+          setTopRoutes(res.data.topRoutes || []);
+          setAppliedFilter(res.data.appliedFilter ?? null);
+          setLoyaltyLeaders(res.data.loyaltyLeaders || []);
+        } else {
+          setErrorMessage(res.data.message || "Không thể tải dữ liệu thống kê");
+        }
+      } catch (error) {
+        console.error("Error fetching report:", error);
+        setErrorMessage("Không thể tải báo cáo. Vui lòng kiểm tra lại server.");
+      } finally {
+        if (isInitialLoad) {
+          setLoading(false);
+          initialLoadRef.current = false;
+        }
+        setRefreshing(false);
+      }
+    };
+
+    fetchReport();
+  }, [authChecked, partnerId, period, selectedDay, selectedMonth, selectedYear]);
+
+  const filterDescription = (() => {
+    if (period === "all" && !appliedFilter?.start && !appliedFilter?.end) {
+      return "Toàn bộ thời gian";
+    }
+    if (!appliedFilter?.start || !appliedFilter?.end) {
+      return "";
+    }
+    const start = new Date(appliedFilter.start).toLocaleDateString("vi-VN");
+    const end = new Date(appliedFilter.end).toLocaleDateString("vi-VN");
+    return start === end ? start : `${start} - ${end}`;
+  })();
+
+  if (loading) {
+    return <div className="p-10 text-center">Đang tải dữ liệu thống kê...</div>;
+  }
+
+  if (authChecked && !partnerId) {
+    return (
+      <div className="p-10 text-center">
+        Bạn cần đăng nhập bằng tài khoản nhà xe để xem thống kê riêng của mình.
+      </div>
+    );
+  }
 
   return (
     <div className="dashboard-container">
@@ -90,8 +234,8 @@ export default function BusTicketDashboard() {
           display: grid;
           gap: 20px;
         }
-        .grid-4 {
-          grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        .grid-6 {
+          grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
         }
         .grid-2 {
           grid-template-columns: repeat(auto-fit, minmax(450px, 1fr));
@@ -114,6 +258,8 @@ export default function BusTicketDashboard() {
         .red { background: linear-gradient(135deg, #ef4444, #dc2626); }
         .green { background: linear-gradient(135deg, #10b981, #059669); }
         .amber { background: linear-gradient(135deg, #f59e0b, #d97706); }
+        .blue { background: linear-gradient(135deg, #3b82f6, #2563eb); }
+        .purple { background: linear-gradient(135deg, #8b5cf6, #7c3aed); }
         .stat-header {
           display: flex;
           justify-content: space-between;
@@ -174,13 +320,158 @@ export default function BusTicketDashboard() {
         .summary-item.green { border-color: #10b981; }
         .summary-item.amber { border-color: #f59e0b; }
         .summary-item p { margin: 0; }
+        .filter-grid {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 16px;
+          align-items: flex-end;
+        }
+        .filter-grid label {
+          display: block;
+          font-size: 13px;
+          color: #475569;
+          margin-bottom: 4px;
+        }
+        .filter-grid input,
+        .filter-grid select {
+          padding: 8px 12px;
+          border-radius: 8px;
+          border: 1px solid #cbd5f5;
+          min-width: 180px;
+          background: #fff;
+          color: #0f172a;
+        }
+        .filter-info {
+          margin-top: 12px;
+          font-size: 13px;
+          color: #475569;
+        }
+        .refresh-tag {
+          font-size: 13px;
+          color: #2563eb;
+          font-weight: 600;
+        }
+        .loyalty-card {
+          background: linear-gradient(135deg, #f8fbff, #e0edff);
+          border: 1px solid #cfdfff;
+        }
+        .loyalty-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 12px;
+        }
+        .loyalty-header h2 {
+          margin: 0;
+          color: #1d4ed8;
+        }
+        .loyalty-list {
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+        }
+        .loyalty-item {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          background: white;
+          border-radius: 12px;
+          padding: 12px 16px;
+          box-shadow: 0 4px 12px rgba(37, 99, 235, 0.08);
+          border-left: 4px solid #3b82f6;
+        }
+        .loyalty-rank {
+          width: 36px;
+          height: 36px;
+          border-radius: 10px;
+          background: #eff6ff;
+          color: #1d4ed8;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-weight: 700;
+          margin-right: 12px;
+        }
+        .loyalty-info {
+          flex: 1;
+          color: #0f172a;
+        }
+        .loyalty-info p {
+          margin: 0;
+          font-weight: 600;
+        }
+        .loyalty-info span {
+          font-size: 13px;
+          color: #64748b;
+        }
+        .loyalty-points {
+          font-weight: 700;
+          color: #0f172a;
+          font-size: 16px;
+        }
       `}</style>
 
       <h1>Trang quản trị hệ thống vé xe online</h1>
       <p className="subtitle">Thống kê và báo cáo tổng quan</p>
 
       {/* Thống kê tổng */}
-      <div className="grid grid-4">
+      {errorMessage && (
+        <div className="card" style={{ marginBottom: "16px" }}>
+          <strong>{errorMessage}</strong>
+        </div>
+      )}
+
+      <div className="card filter-card">
+        <div className="filter-grid">
+          <div>
+            <label>Chu kỳ thống kê</label>
+            <select value={period} onChange={(e) => setPeriod(e.target.value as PeriodFilter)}>
+              <option value="all">Tất cả</option>
+              <option value="day">Theo ngày</option>
+              <option value="month">Theo tháng</option>
+              <option value="year">Theo năm</option>
+            </select>
+          </div>
+
+          {period === "day" && (
+            <div>
+              <label>Chọn ngày</label>
+              <input type="date" value={selectedDay} onChange={(e) => setSelectedDay(e.target.value)} />
+            </div>
+          )}
+
+          {period === "month" && (
+            <div>
+              <label>Chọn tháng</label>
+              <input type="month" value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)} />
+            </div>
+          )}
+
+          {period === "year" && (
+            <div>
+              <label>Chọn năm</label>
+              <input
+                type="number"
+                min="2000"
+                max="2100"
+                value={selectedYear}
+                onChange={(e) => setSelectedYear(e.target.value)}
+              />
+            </div>
+          )}
+
+          <div style={{ marginLeft: "auto" }}>
+            {refreshing && <span className="refresh-tag">Đang cập nhật...</span>}
+          </div>
+        </div>
+        {filterDescription && (
+          <p className="filter-info">
+            Đang xem dữ liệu: <strong>{filterDescription}</strong>
+          </p>
+        )}
+      </div>
+
+      <div className="grid grid-6">
         <div className="stat-card cyan">
           <div className="stat-header">
             <ShoppingCart size={36} />
@@ -214,6 +505,28 @@ export default function BusTicketDashboard() {
           </div>
         </div>
 
+        <div className="stat-card purple">
+          <div className="stat-header">
+            <Armchair size={36} />
+            <span>Chi tiết</span>
+          </div>
+          <div>
+            <h3>SỐ GHẾ TRỐNG</h3>
+            <p className="stat-value">{stats.totalEmptySeats}</p>
+          </div>
+        </div>
+
+        <div className="stat-card blue">
+          <div className="stat-header">
+            <BadgeDollarSign size={36} />
+            <span>Chi tiết</span>
+          </div>
+          <div>
+            <h3>ĐIỂM TÍCH LŨY</h3>
+            <p className="stat-value">{stats.totalPoints}</p>
+          </div>
+        </div>
+
         <div className="stat-card amber">
           <div className="stat-header">
             <Star size={36} />
@@ -229,14 +542,14 @@ export default function BusTicketDashboard() {
       {/* Biểu đồ */}
       <div className="grid grid-2" style={{ marginTop: "24px" }}>
         <div className="card">
-          <h2>Biểu đồ doanh thu và vé bán theo tháng</h2>
+          <h2>Biểu đồ doanh thu và vé bán</h2>
           <ResponsiveContainer width="100%" height={300}>
             <LineChart data={revenueData}>
               <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="month" />
+              <XAxis dataKey="label" />
               <YAxis yAxisId="left" />
               <YAxis yAxisId="right" orientation="right" />
-              <Tooltip />
+              <Tooltip formatter={(value) => Number(value).toLocaleString()} />
               <Legend />
               <Line yAxisId="left" type="monotone" dataKey="revenue" stroke="#3b82f6" strokeWidth={2} name="Doanh thu (VNĐ)" />
               <Line yAxisId="right" type="monotone" dataKey="tickets" stroke="#10b981" strokeWidth={2} name="Số vé bán" />
@@ -262,10 +575,10 @@ export default function BusTicketDashboard() {
                   <Cell key={`cell-${index}`} fill={entry.color} />
                 ))}
               </Pie>
-              <Tooltip />
+              <Tooltip formatter={(value: number | string) => `${Number(value).toLocaleString()}`} />
             </PieChart>
           </ResponsiveContainer>
-          <div style={{ display: "flex", justifyContent: "center", gap: "20px" }}>
+          <div style={{ display: "flex", justifyContent: "center", gap: "20px", flexWrap: "wrap" }}>
             {orderStatusData.map((item, idx) => (
               <div key={idx} className="legend-item">
                 <div className="legend-color" style={{ backgroundColor: item.color }}></div>
@@ -293,15 +606,15 @@ export default function BusTicketDashboard() {
             <tbody>
               {recentOrders.map((o, i) => (
                 <tr key={i}>
-                  <td>{o.id}</td>
+                  <td>{String(o.id).substring(0, 8)}...</td>
                   <td>{o.customer}</td>
                   <td>{o.route}</td>
                   <td>{o.amount.toLocaleString()}₫</td>
                   <td>
                     <span className={`badge ${
-                      o.status === "Đã thanh toán"
+                      o.status === "paid" || o.status === "completed" || o.status === "done"
                         ? "success"
-                        : o.status === "Chờ xác nhận"
+                        : o.status === "pending" || o.status === "processing"
                         ? "warning"
                         : "error"
                     }`}>
@@ -351,9 +664,34 @@ export default function BusTicketDashboard() {
           </div>
           <div className="summary-item amber">
             <p>Giá trung bình/vé</p>
-            <p><strong>{Math.round(stats.totalRevenue / stats.totalTickets).toLocaleString()}₫</strong></p>
+            <p><strong>{stats.totalTickets > 0 ? Math.round(stats.totalRevenue / stats.totalTickets).toLocaleString() : 0}₫</strong></p>
           </div>
         </div>
+      </div>
+
+      <div className="card loyalty-card" style={{ marginTop: "24px" }}>
+        <div className="loyalty-header">
+          <h2>Bảng xếp hạng điểm tích lũy</h2>
+          <span style={{ color: "#1d4ed8", fontWeight: 600 }}>
+            Top {loyaltyLeaders.length || 0} tài khoản
+          </span>
+        </div>
+        {loyaltyLeaders.length > 0 ? (
+          <div className="loyalty-list">
+            {loyaltyLeaders.map((leader, index) => (
+              <div className="loyalty-item" key={`${leader.userId}-${index}`}>
+                <div className="loyalty-rank">{index + 1}</div>
+                <div className="loyalty-info">
+                  <p>{leader.name || "Khách hàng"}</p>
+                  <span>ID: {leader.userId}</span>
+                </div>
+                <div className="loyalty-points">{leader.points.toLocaleString()} điểm</div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p style={{ color: "#475569" }}>Chưa có dữ liệu tích lũy cho giai đoạn này.</p>
+        )}
       </div>
     </div>
   );
