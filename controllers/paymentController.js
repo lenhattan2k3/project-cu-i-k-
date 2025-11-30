@@ -50,3 +50,14 @@ export const getUserPayments = async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 };
+
+// ⚠️ Xóa tất cả giao dịch thanh toán
+export const deleteAllPayments = async (_req, res) => {
+  try {
+    const result = await Payment.deleteMany({});
+    res.json({ success: true, deleted: result.deletedCount });
+  } catch (err) {
+    console.error("❌ Lỗi deleteAllPayments:", err);
+    res.status(500).json({ error: err.message });
+  }
+};

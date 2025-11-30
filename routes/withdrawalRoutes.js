@@ -1,5 +1,6 @@
 import express from "express";
 import {
+  getAdminDebtReport,
   getWithdrawableAmount,
   getAvailableFallback,
   listWithdrawals,
@@ -11,6 +12,7 @@ import {
 
 const router = express.Router();
 
+router.get("/report/debts", getAdminDebtReport);
 router.get("/amount/:partnerId", getWithdrawableAmount);
 router.get("/available/:partnerId", getAvailableFallback);
 router.get("/", listWithdrawals);

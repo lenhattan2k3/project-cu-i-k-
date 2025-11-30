@@ -10,6 +10,8 @@ const promotionSchema = new mongoose.Schema(
     endDate: { type: Date, required: true },
     description: { type: String, default: "" },
     image: { type: String, default: "" },
+    partnerId: { type: String, required: true, index: true },
+    partnerName: { type: String, default: "" },
   },
   { timestamps: true }
 );

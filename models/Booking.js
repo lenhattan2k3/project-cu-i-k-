@@ -58,7 +58,7 @@ feeApplied: {
     // --- PHƯƠNG THỨC THANH TOÁN ---
     paymentMethod: {
       type: String,
-      enum: ["card", "bank", "cash", "unknown"],
+      enum: ["card", "bank", "cash", "payos", "unknown"],
       default: "unknown",
     },
 
@@ -110,6 +110,10 @@ feeApplied: {
        feePercent: {                    // ✅ THÊM FIELD NÀY
       type: Number,
       default: 0,
+    },
+    isFoodService: {
+      type: Boolean,
+      default: false,
     },
   },
 

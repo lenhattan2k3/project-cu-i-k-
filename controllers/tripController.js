@@ -1,9 +1,39 @@
 import Trip from "../models/tripModel.js";
+import Booking from "../models/Booking.js";
 
 // 🔍 Lấy tất cả chuyến xe
 export const getAllTrips = async (req, res) => {
   try {
-    const trips = await Trip.find().sort({ createdAt: -1 });
+    const { partnerId } = req.query;
+    const query = partnerId ? { partnerId } : {};
+    
+    // Use lean() to get plain JavaScript objects
+    let trips = await Trip.find(query).sort({ createdAt: -1 }).lean();
+
+    // Fetch all bookings for these trips
+    const tripIds = trips.map(t => t._id);
+    const bookings = await Booking.find({ tripId: { $in: tripIds } }).select('tripId soGhe');
+
+    // Calculate booked seats for each trip
+    const bookingMap = {};
+    bookings.forEach(b => {
+      if (!bookingMap[b.tripId]) bookingMap[b.tripId] = new Set();
+      if (Array.isArray(b.soGhe)) {
+        b.soGhe.forEach(seat => bookingMap[b.tripId].add(seat));
+      }
+    });
+
+    // Add availableSeats to each trip
+    trips = trips.map(trip => {
+      const bookedCount = bookingMap[trip._id] ? bookingMap[trip._id].size : 0;
+      const totalSeats = trip.tongSoGhe || trip.soLuongGhe || 0;
+      return {
+        ...trip,
+        bookedSeatCount: bookedCount,
+        availableSeats: Math.max(0, totalSeats - bookedCount)
+      };
+    });
+
     res.status(200).json(trips);
   } catch (error) {
     console.error("❌ Lỗi khi lấy danh sách chuyến xe:", error);

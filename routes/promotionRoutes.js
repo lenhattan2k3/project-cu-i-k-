@@ -5,12 +5,14 @@ import {
   getPromotions,
   deletePromotion,
   applyPromotion,
+  generatePromotionPreview,
 } from "../controllers/promotionController.js";
 
 const router = express.Router();
 const storage = multer.memoryStorage(); // ✅ Dùng memoryStorage thay vì dest
 const upload = multer({ storage });
 
+router.post("/preview", generatePromotionPreview);
 router.post("/", upload.single("image"), createPromotion);
 router.get("/", getPromotions);
 router.delete("/:id", deletePromotion);

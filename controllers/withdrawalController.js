@@ -1,5 +1,316 @@
 import mongoose from "mongoose";
 import { io, onlineUsers } from "../server.js";
+import { recordWithdrawalLedgerImpact } from "./ledgerController.js";
+import PartnerLedger from "../models/PartnerLedger.js";
+
+export const getAdminDebtReport = async (req, res) => {
+  try {
+    if (!mongoose?.connection) {
+      return res.status(500).json({ success: false, error: "MongoDB connection unavailable" });
+    }
+
+    const bookingsColl = mongoose.connection.collection("bookings");
+    const withdrawalsColl = mongoose.connection.collection("withdrawals");
+    const tripsColl = mongoose.connection.collection("trips");
+    const statusFilter = ["paid", "completed", "done"];
+
+    const bookingAgg = await bookingsColl
+      .aggregate([
+        {
+          $match: {
+            partnerId: { $nin: [null, ""] },
+            status: { $in: statusFilter },
+          },
+        },
+        {
+          $addFields: {
+            effectiveRevenue: {
+              $ifNull: ["$finalTotal", { $ifNull: ["$totalPrice", 0] }],
+            },
+            feeSourcePercent: {
+              $ifNull: ["$feePercent", { $ifNull: ["$feeApplied", 0] }],
+            },
+            seatsCount: {
+              $cond: [{ $isArray: "$soGhe" }, { $size: "$soGhe" }, 0],
+            },
+          },
+        },
+        {
+          $addFields: {
+            effectiveServiceFee: {
+              $cond: [
+                { $gt: ["$serviceFeeAmount", 0] },
+                "$serviceFeeAmount",
+                {
+                  $cond: [
+                    { $gt: ["$feeSourcePercent", 0] },
+                    {
+                      $multiply: [
+                        "$effectiveRevenue",
+                        {
+                          $divide: ["$feeSourcePercent", 100],
+                        },
+                      ],
+                    },
+                    0,
+                  ],
+                },
+              ],
+            },
+          },
+        },
+        {
+          $group: {
+            _id: "$partnerId",
+            totalRevenue: { $sum: "$effectiveRevenue" },
+            totalServiceFee: { $sum: "$effectiveServiceFee" },
+            totalBookings: { $sum: 1 },
+            totalSeats: { $sum: "$seatsCount" },
+            latestBooking: { $max: "$createdAt" },
+          },
+        },
+        { $sort: { totalRevenue: -1 } },
+      ])
+      .toArray();
+
+    const ledgers = await PartnerLedger.find().lean();
+    const ledgerPartnerIds = ledgers.map((ledger) => ledger.partnerId).filter(Boolean);
+    const partnerIdsFromBookings = bookingAgg.map((item) => item._id).filter(Boolean);
+    const allPartnerIds = Array.from(new Set([...partnerIdsFromBookings, ...ledgerPartnerIds]));
+
+    const ledgerMap = new Map();
+    ledgers.forEach((ledger) => {
+      if (ledger?.partnerId) {
+        ledgerMap.set(String(ledger.partnerId), ledger);
+      }
+    });
+
+    const nameRows = allPartnerIds.length
+      ? await tripsColl
+          .aggregate([
+            { $match: { partnerId: { $in: allPartnerIds } } },
+            {
+              $group: {
+                _id: "$partnerId",
+                partnerName: { $first: "$nhaXe" },
+                fallbackName: { $first: "$tenChuyen" },
+              },
+            },
+          ])
+          .toArray()
+      : [];
+
+    const partnerNameMap = {};
+    nameRows.forEach((row) => {
+      const key = String(row._id || "").trim();
+      partnerNameMap[key] = row.partnerName || row.fallbackName || `Partner ${key.slice(-4)}`;
+    });
+
+    const feeWithdrawalRows = await withdrawalsColl
+      .aggregate([
+        { $match: { status: "success", deductFrom: "fee" } },
+        {
+          $group: {
+            _id: "$partnerId",
+            feePaid: { $sum: { $ifNull: ["$amount", 0] } },
+          },
+        },
+      ])
+      .toArray();
+
+    const feePaidMap = {};
+    feeWithdrawalRows.forEach((row) => {
+      feePaidMap[String(row._id || "")] = Number(row.feePaid || 0);
+    });
+
+    const receivableWithdrawalRows = await withdrawalsColl
+      .aggregate([
+        { $match: { status: "success", $or: [{ deductFrom: { $exists: false } }, { deductFrom: { $ne: "fee" } }] } },
+        {
+          $group: {
+            _id: "$partnerId",
+            receivablePaid: { $sum: { $ifNull: ["$amount", 0] } },
+          },
+        },
+      ])
+      .toArray();
+
+    const receivablePaidMap = {};
+    receivableWithdrawalRows.forEach((row) => {
+      receivablePaidMap[String(row._id || "")] = Number(row.receivablePaid || 0);
+    });
+
+    const tolerance = 1000; // 1k VND tolerance to ignore rounding noise
+    const partners = bookingAgg.map((item) => {
+      const partnerId = String(item._id || "");
+      const ledgerDoc = ledgerMap.get(partnerId);
+      const totalRevenue = ledgerDoc
+        ? Number(ledgerDoc.totalRevenue ?? 0)
+        : Number(item.totalRevenue || 0);
+      const totalServiceFee = ledgerDoc
+        ? Number(ledgerDoc.totalServiceFee ?? 0)
+        : Number(item.totalServiceFee || 0);
+      const serviceFeeBalanceFromLedger =
+        ledgerDoc && ledgerDoc.serviceFeeBalance != null
+          ? Number(ledgerDoc.serviceFeeBalance)
+          : null;
+      const receivableBalanceFromLedger =
+        ledgerDoc && ledgerDoc.receivableBalance != null
+          ? Number(ledgerDoc.receivableBalance)
+          : null;
+      const totalWithdrawnFee = ledgerDoc
+        ? Number(
+            ledgerDoc.totalWithdrawnFee ??
+              (ledgerDoc.totalServiceFee != null && ledgerDoc.serviceFeeBalance != null
+                ? ledgerDoc.totalServiceFee - ledgerDoc.serviceFeeBalance
+                : 0)
+          )
+        : Number(feePaidMap[partnerId] || 0);
+      const totalWithdrawnReceivable = ledgerDoc
+        ? Number(ledgerDoc.totalWithdrawnReceivable ?? 0)
+        : Number(receivablePaidMap[partnerId] || 0);
+      const feeOutstandingRaw =
+        serviceFeeBalanceFromLedger != null
+          ? serviceFeeBalanceFromLedger
+          : totalServiceFee - totalWithdrawnFee;
+      const isSettled = feeOutstandingRaw <= tolerance;
+      const feeOutstanding = isSettled ? 0 : Math.max(0, feeOutstandingRaw);
+      const hasPartial = !isSettled && totalWithdrawnFee > 0;
+      const feeStatus = isSettled ? "settled" : hasPartial ? "partial" : "due";
+      const receivableOutstanding =
+        receivableBalanceFromLedger != null
+          ? Math.max(0, receivableBalanceFromLedger)
+          : Math.max(0, totalRevenue - totalServiceFee - totalWithdrawnReceivable);
+      const lastWithdrawalAt =
+        ledgerDoc?.lastWithdrawalAt ? new Date(ledgerDoc.lastWithdrawalAt).toISOString() : null;
+      const latestBooking =
+        ledgerDoc?.lastBookingAt
+          ? new Date(ledgerDoc.lastBookingAt).toISOString()
+          : item.latestBooking || null;
+
+      return {
+        partnerId,
+        partnerName: partnerNameMap[partnerId] || partnerId,
+        totalRevenue,
+        totalServiceFee,
+        feePaid: totalWithdrawnFee,
+        feeOutstanding,
+        serviceFeeBalance: feeOutstanding,
+        receivableBalance: receivableOutstanding,
+        netReceivable: receivableOutstanding,
+        totalBookings: Number(item.totalBookings || 0),
+        totalSeats: Number(item.totalSeats || 0),
+        latestBooking,
+        lastWithdrawalAt,
+        totalWithdrawnFee,
+        totalWithdrawnReceivable,
+        feeStatus,
+      };
+    });
+
+    // Include partners that exist only in ledger but not in booking aggregation
+    ledgerMap.forEach((ledgerDoc, partnerId) => {
+      const hasExisting = partners.some((p) => p.partnerId === partnerId);
+      if (hasExisting) return;
+
+      const totalRevenue = Number(ledgerDoc.totalRevenue ?? 0);
+      const totalServiceFee = Number(ledgerDoc.totalServiceFee ?? 0);
+      const feePaid = Number(ledgerDoc.totalWithdrawnFee ?? 0);
+      const feeOutstandingRaw = Number(
+        ledgerDoc.serviceFeeBalance ?? totalServiceFee - feePaid
+      );
+      const isSettled = feeOutstandingRaw <= tolerance;
+      const feeOutstanding = isSettled ? 0 : Math.max(0, feeOutstandingRaw);
+      const hasPartial = !isSettled && feePaid > 0;
+      const feeStatus = isSettled ? "settled" : hasPartial ? "partial" : "due";
+      const receivableOutstanding = Math.max(0, Number(ledgerDoc.receivableBalance ?? 0));
+      const latestBooking = ledgerDoc.lastBookingAt
+        ? new Date(ledgerDoc.lastBookingAt).toISOString()
+        : null;
+      const lastWithdrawalAt = ledgerDoc.lastWithdrawalAt
+        ? new Date(ledgerDoc.lastWithdrawalAt).toISOString()
+        : null;
+
+      partners.push({
+        partnerId,
+        partnerName: partnerNameMap[partnerId] || partnerId,
+        totalRevenue,
+        totalServiceFee,
+        feePaid,
+        feeOutstanding,
+        serviceFeeBalance: feeOutstanding,
+        receivableBalance: receivableOutstanding,
+        netReceivable: Math.max(0, receivableOutstanding),
+        totalBookings: 0,
+        totalSeats: 0,
+        latestBooking,
+        lastWithdrawalAt,
+        totalWithdrawnFee: feePaid,
+        totalWithdrawnReceivable: Number(ledgerDoc.totalWithdrawnReceivable ?? 0),
+        feeStatus,
+      });
+    });
+
+    partners.sort((a, b) => b.totalRevenue - a.totalRevenue);
+
+    const summary = partners.reduce(
+      (acc, partner) => {
+        acc.totalPartners += 1;
+        acc.totalRevenue += partner.totalRevenue;
+        acc.totalServiceFee += partner.totalServiceFee;
+        acc.feePaid += partner.feePaid;
+        acc.feeOutstanding += partner.feeOutstanding;
+        acc.receivableOutstanding += partner.netReceivable;
+        if (partner.feeStatus === "settled") acc.fullySettled += 1;
+        if (partner.feeStatus === "partial") acc.partial += 1;
+        if (partner.feeStatus === "due") acc.overdue += 1;
+        return acc;
+      },
+      {
+        totalPartners: 0,
+        totalRevenue: 0,
+        totalServiceFee: 0,
+        feePaid: 0,
+        feeOutstanding: 0,
+        receivableOutstanding: 0,
+        fullySettled: 0,
+        partial: 0,
+        overdue: 0,
+      }
+    );
+
+    const revenueTop = partners.slice(0, 8).map((partner) => ({
+      name: partner.partnerName,
+      revenue: partner.totalRevenue,
+    }));
+
+    const feeStatusCounts = {
+      settled: summary.fullySettled,
+      partial: summary.partial,
+      due: summary.overdue,
+    };
+
+    const charts = {
+      revenueTop,
+      feeStatus: [
+        { status: "Đã thanh toán", value: feeStatusCounts.settled, color: "#16a34a" },
+        { status: "Thanh toán dở dang", value: feeStatusCounts.partial, color: "#f97316" },
+        { status: "Còn nợ", value: feeStatusCounts.due, color: "#dc2626" },
+      ].filter((item) => item.value > 0),
+    };
+
+    return res.json({
+      success: true,
+      summary,
+      partners,
+      charts,
+      generatedAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error("getAdminDebtReport ERROR:", err);
+    return res.status(500).json({ success: false, error: err?.message || "Server error" });
+  }
+};
 
 /**
  * GET /api/withdraws/amount/:partnerId
@@ -141,6 +452,16 @@ export const createWithdrawal = async (req, res) => {
           console.warn("Failed to emit withdrawalSuccess:", emitErr);
         }
 
+      if (doc.status === "success") {
+        await recordWithdrawalLedgerImpact({
+          partnerId: doc.partnerId,
+          withdrawalId: String(doc._id),
+          amount: doc.amount,
+          bucket: doc.deductFrom,
+          occurredAt: doc.createdAt ? new Date(doc.createdAt) : new Date(),
+        });
+      }
+
       return res.status(201).json({ success: true, withdrawal: doc });
     } catch (insertErr) {
       // Handle duplicate orderCode (E11000) by regenerating and retrying once
@@ -152,6 +473,15 @@ export const createWithdrawal = async (req, res) => {
           const r2 = await withdrawalsColl.insertOne(doc);
           doc._id = r2.insertedId;
           console.log("Withdrawal created after retry:", doc);
+          if (doc.status === "success") {
+            await recordWithdrawalLedgerImpact({
+              partnerId: doc.partnerId,
+              withdrawalId: String(doc._id),
+              amount: doc.amount,
+              bucket: doc.deductFrom,
+              occurredAt: doc.createdAt ? new Date(doc.createdAt) : new Date(),
+            });
+          }
           return res.status(201).json({ success: true, withdrawal: doc });
         } catch (err2) {
           console.error("createWithdrawal INSERT retry ERROR:", err2);
@@ -202,6 +532,16 @@ export const updateWithdrawal = async (req, res) => {
       } catch (emitErr) {
         console.warn("Failed to emit withdrawalSuccess on update:", emitErr);
       }
+
+    if (before?.status !== "success" && value?.status === "success") {
+      await recordWithdrawalLedgerImpact({
+        partnerId: value.partnerId,
+        withdrawalId: String(value._id),
+        amount: value.amount,
+        bucket: value.deductFrom,
+        occurredAt: value.updatedAt ? new Date(value.updatedAt) : new Date(),
+      });
+    }
 
     return res.json({ success: true, withdrawal: value });
   } catch (err) {
@@ -258,6 +598,16 @@ export const confirmWithdrawal = async (req, res) => {
       }
     } catch (emitErr) {
       console.warn('Failed to emit withdrawalSuccess on confirm:', emitErr);
+    }
+
+    if (value) {
+      await recordWithdrawalLedgerImpact({
+        partnerId: value.partnerId,
+        withdrawalId: String(value._id),
+        amount: value.amount,
+        bucket: value.deductFrom,
+        occurredAt: value.updatedAt ? new Date(value.updatedAt) : new Date(),
+      });
     }
 
     return res.json({ success: true, withdrawal: value });

@@ -263,3 +263,57 @@ export const userReplyReview = async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 };
+
+/* ============================================================
+   6) USER RECALL MESSAGE
+============================================================ */
+export const recallReviewMessage = async (req, res) => {
+  try {
+    const { messageId, userId } = req.body;
+
+    if (!messageId || !userId) {
+      return res.status(400).json({ message: "Thiếu messageId hoặc userId" });
+    }
+
+    const review = await Review.findById(req.params.id);
+    if (!review) {
+      return res.status(404).json({ message: "Không tìm thấy review" });
+    }
+
+    const targetMessage = review.messages.id(messageId);
+    if (!targetMessage) {
+      return res.status(404).json({ message: "Không tìm thấy tin nhắn" });
+    }
+
+    if (
+      targetMessage.sender !== "user" ||
+      (targetMessage.senderId && targetMessage.senderId !== userId)
+    ) {
+      return res.status(403).json({ message: "Không thể thu hồi tin nhắn này" });
+    }
+
+    targetMessage.deleteOne();
+    await review.save();
+
+    const partnerSocket = onlineUsers.get(review.partnerId);
+    if (partnerSocket) {
+      io.to(partnerSocket).emit("review:message-recalled", {
+        reviewId: review._id,
+        messageId,
+      });
+    }
+
+    const userSocket = onlineUsers.get(review.userId);
+    if (userSocket) {
+      io.to(userSocket).emit("review:message-recalled", {
+        reviewId: review._id,
+        messageId,
+      });
+    }
+
+    res.json({ data: review, removedMessageId: messageId });
+  } catch (err) {
+    console.log("❌ recallReviewMessage:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+};

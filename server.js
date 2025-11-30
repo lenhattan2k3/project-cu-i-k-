@@ -20,6 +20,8 @@ import statsRoutes from "./routes/statsRoutes.js";
 import feeRoutes from "./routes/feeRoutes.js";
 import payosRoutes from "./routes/payosRoutes.js";
 import withdrawalRoutes from "./routes/withdrawalRoutes.js";
+import financeRoutes from "./routes/financeRoutes.js";
+import invoiceRoutes from "./routes/invoiceRoutes.js";
 
 dotenv.config();
 
@@ -87,6 +89,8 @@ app.use("/api/review", reviewRoutes);
 app.use("/api/stats", statsRoutes);
 
 app.use("/api/fees", feeRoutes);
+app.use("/api/finance", financeRoutes);
+app.use("/api/invoices", invoiceRoutes);
 
 app.use("/api/payos", payosRoutes);
 

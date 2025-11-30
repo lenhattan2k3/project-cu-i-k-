@@ -1,16 +1,17 @@
 import mongoose from "mongoose";
 
-const messageSchema = new mongoose.Schema(
-  {
-    sender: { type: String, enum: ["user", "partner"], required: true },
-    text: { type: String, default: "" },
-    imageUrl: { type: String },
-    createdAt: { type: Date, default: Date.now },
-    senderId: { type: String },       // Firebase UID
-    senderName: { type: String },
+const messageSchema = new mongoose.Schema({
+  _id: {
+    type: mongoose.Schema.Types.ObjectId,
+    default: () => new mongoose.Types.ObjectId(),
   },
-  { _id: false }
-);
+  sender: { type: String, enum: ["user", "partner"], required: true },
+  text: { type: String, default: "" },
+  imageUrl: { type: String },
+  createdAt: { type: Date, default: Date.now },
+  senderId: { type: String }, // Firebase UID
+  senderName: { type: String },
+});
 
 const reviewSchema = new mongoose.Schema(
   {

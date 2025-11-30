@@ -9,6 +9,7 @@ import {
   deleteReview,
   partnerReplyReview,
   userReplyReview,
+   recallReviewMessage,
 } from "../controllers/reviewController.js";
 
 const router = express.Router();
@@ -45,5 +46,6 @@ router.delete("/:id", deleteReview);
 ============================================================ */
 router.post("/:id/partner-reply", partnerReplyReview);
 router.post("/:id/user-reply", userReplyReview);
+router.post("/:id/recall", recallReviewMessage);
 
 export default router;

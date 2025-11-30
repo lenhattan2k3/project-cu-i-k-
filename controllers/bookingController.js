@@ -4,6 +4,8 @@ import Review from "../models/Review.js";
 import mongoose from "mongoose";
 import FeeConfig from "../models/FeeConfig.js";
 import FeeHistory from "../models/FeeHistory.js";
+import { recordBookingLedgerImpact } from "./ledgerController.js";
+import { ensureInvoiceForBooking } from "./invoiceController.js";
 
 /**
  * ===================================================
@@ -16,6 +18,12 @@ const getCurrentFeePercent = async () => {
     .sort({ createdAt: -1 })  // ⚠️ Mới nhất theo createdAt
     .lean();
   return feeRecord?.newPercent || 0;
+};
+
+const isPaidStatus = (value) => {
+  if (!value) return false;
+  const normalized = String(value).toLowerCase();
+  return normalized === "paid" || normalized === "completed" || normalized === "done";
 };
 
 export const bookTicket = async (req, res) => {
@@ -61,6 +69,23 @@ export const bookTicket = async (req, res) => {
     });
 
     await newBooking.save();
+
+    if (newBooking.status === "paid") {
+      await recordBookingLedgerImpact({
+        partnerId: newBooking.partnerId,
+        bookingId: String(newBooking._id),
+        grossAmount: newBooking.finalTotal ?? newBooking.totalPrice ?? 0,
+        serviceFeeAmount: newBooking.serviceFeeAmount ?? 0,
+        discountAmount: newBooking.discountAmount ?? 0,
+        occurredAt: newBooking.createdAt ?? new Date(),
+      });
+
+      try {
+        await ensureInvoiceForBooking(newBooking);
+      } catch (invoiceErr) {
+        console.error("Failed to create invoice after booking", invoiceErr);
+      }
+    }
 
     return res.status(201).json({
       success: true,
@@ -154,13 +179,16 @@ export const updateBookingStatus = async (req, res) => {
       voucherCode, 
       discountAmount, 
       finalTotal,
-      diemDonChiTiet
+      diemDonChiTiet,
+      isFoodService
     } = req.body;
 
     const booking = await Booking.findById(req.params.id);
     if (!booking) {
       return res.status(404).json({ success: false, message: "Không tìm thấy vé" });
     }
+
+    const wasPreviouslyPaid = isPaidStatus(booking.status);
 
     const updateData = { status };
 
@@ -169,9 +197,10 @@ export const updateBookingStatus = async (req, res) => {
     updateData.discountAmount = discountAmount ?? 0;
     updateData.finalTotal = finalTotal ?? booking.totalPrice;
     updateData.diemDonChiTiet = diemDonChiTiet?.trim() || null;
+    if (typeof isFoodService === 'boolean') updateData.isFoodService = isFoodService;
 
     // ✅ FIX: Khi duyệt (status = "paid"), tính & lưu phí nếu chưa có
-    if (status === "paid" && !booking.feePercent) {
+    if (isPaidStatus(status) && !booking.feePercent) {
       const feePercent = await getCurrentFeePercent();  // ✅ Dùng helper
       const price = finalTotal || booking.totalPrice || 0;
       const serviceFeeAmount = Math.round(price * (feePercent / 100));
@@ -194,6 +223,23 @@ export const updateBookingStatus = async (req, res) => {
       updateData,
       { new: true }
     ).populate("tripId").populate("userId");
+
+    if (isPaidStatus(status) && !wasPreviouslyPaid && updatedBooking) {
+      await recordBookingLedgerImpact({
+        partnerId: updatedBooking.partnerId,
+        bookingId: String(updatedBooking._id),
+        grossAmount: updatedBooking.finalTotal ?? updatedBooking.totalPrice ?? 0,
+        serviceFeeAmount: updatedBooking.serviceFeeAmount ?? 0,
+        discountAmount: updatedBooking.discountAmount ?? 0,
+        occurredAt: updatedBooking.updatedAt ?? new Date(),
+      });
+
+      try {
+        await ensureInvoiceForBooking(updatedBooking);
+      } catch (invoiceErr) {
+        console.error("Failed to ensure invoice for booking", invoiceErr);
+      }
+    }
 
     console.log("✅ Updated booking:", {
       _id: updatedBooking._id,
@@ -266,27 +312,55 @@ export const updateBooking = async (req, res) => {
     const booking = await Booking.findById(bookingId);
     if (!booking) return res.status(404).json({ success: false, message: "Booking not found" });
 
-    // ✅ CHỈ tính phí khi LẦN ĐẦU mark "paid"
-    if (status === "paid" && booking.status !== "paid") {
-      const feeRecord = await FeeHistory.findOne()
-        .sort({ createdAt: -1 })
-        .lean();
+    const wasPreviouslyPaid = isPaidStatus(booking.status);
+    let becamePaid = false;
 
-      const feePercent = feeRecord?.newPercent || 0;
-      const serviceFeeAmount = Math.round((finalTotal || booking.totalPrice || 0) * (feePercent / 100));
+    if (typeof finalTotal === "number") {
+      booking.finalTotal = finalTotal;
+    }
 
-      booking.status = "paid";
-      booking.feePercent = feePercent;
-      booking.serviceFeeAmount = serviceFeeAmount;
-      booking.feeAppliedAt = new Date();
+    if (status) {
+      if (isPaidStatus(status) && !wasPreviouslyPaid) {
+        const feeRecord = await FeeHistory.findOne().sort({ createdAt: -1 }).lean();
+        const feePercent = feeRecord?.newPercent || 0;
+        const price = booking.finalTotal ?? booking.totalPrice ?? 0;
+        const serviceFeeAmount = Math.round(price * (feePercent / 100));
 
-      console.log("✅ [First time paid] Fee calculated:", {
-        feePercent,
-        serviceFeeAmount
-      });
+        booking.feePercent = feePercent;
+        booking.feeApplied = feePercent;
+        booking.serviceFeeAmount = serviceFeeAmount;
+        booking.feeAppliedAt = new Date();
+        becamePaid = true;
+
+        console.log("✅ [First time paid/completed] Fee calculated:", {
+          bookingId,
+          feePercent,
+          serviceFeeAmount,
+        });
+      }
+
+      booking.status = status;
     }
 
     await booking.save();
+
+    if (becamePaid) {
+      await recordBookingLedgerImpact({
+        partnerId: booking.partnerId,
+        bookingId: String(booking._id),
+        grossAmount: booking.finalTotal ?? booking.totalPrice ?? 0,
+        serviceFeeAmount: booking.serviceFeeAmount ?? 0,
+        discountAmount: booking.discountAmount ?? 0,
+        occurredAt: booking.updatedAt ?? new Date(),
+      });
+
+      try {
+        await ensureInvoiceForBooking(booking);
+      } catch (invoiceErr) {
+        console.error("Failed to ensure invoice when booking updated", invoiceErr);
+      }
+    }
+
     res.json({ success: true, message: "✅ Cập nhật vé thành công!", booking });
   } catch (err) {
     console.error("❌ Error:", err);
@@ -352,6 +426,8 @@ export const updatePaymentStatus = async (req, res) => {
     if (!booking)
       return res.status(404).json({ message: "Không tìm thấy vé để cập nhật thanh toán" });
 
+    const wasPreviouslyPaid = isPaidStatus(booking.status);
+
     if (method === "bank") {
       booking.status = "paid";
       booking.paymentMethod = "bank";
@@ -365,6 +441,17 @@ export const updatePaymentStatus = async (req, res) => {
     }
 
     await booking.save();
+
+    if (isPaidStatus(booking.status) && !wasPreviouslyPaid) {
+      await recordBookingLedgerImpact({
+        partnerId: booking.partnerId,
+        bookingId: String(booking._id),
+        grossAmount: booking.finalTotal ?? booking.totalPrice ?? 0,
+        serviceFeeAmount: booking.serviceFeeAmount ?? 0,
+        discountAmount: booking.discountAmount ?? 0,
+        occurredAt: booking.updatedAt ?? new Date(),
+      });
+    }
 
     res.json({ message: "✅ Thanh toán thành công!", booking });
   } catch (err) {
@@ -453,6 +540,7 @@ export const getBookingsByPartner = async (req, res) => {
         status: b.status,
         paymentMethod: b.paymentMethod,
         voucherCode: b.voucherCode,
+        isFoodService: b.isFoodService,
 
         // ✅ QUAN TRỌNG: Đảm bảo return các field phí này
         feePercent: feePercent,

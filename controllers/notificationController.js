@@ -1,5 +1,6 @@
 // controllers/notificationController.js
 import Notification from "../models/Notification.js";
+import Booking from "../models/Booking.js";
 import { io } from "../server.js";
 import { v2 as cloudinary } from "cloudinary";
 import dotenv from "dotenv";
@@ -24,7 +25,7 @@ export const createNotification = [
   upload.single("image"), // Nhận file ảnh từ form-data
   async (req, res) => {
     try {
-      const { title, content, sender, receivers } = req.body;
+      const { title, content, sender, receivers, partnerId, targetScope } = req.body;
       let imageUrl = null;
 
       // Nếu có ảnh thì upload lên Cloudinary
@@ -38,11 +39,33 @@ export const createNotification = [
 
       // ✅ Xử lý receivers an toàn (có thể là chuỗi hoặc mảng)
       let receiversArray = [];
-      if (typeof receivers === "string") {
+      let targetUserIds = [];
+
+      if (targetScope === "partner-customers") {
+        if (!partnerId) {
+          return res.status(400).json({ message: "❌ Thiếu partnerId để xác định khách hàng!" });
+        }
+
+        const customerIds = await Booking.distinct("userId", { partnerId });
+        const filteredIds = (customerIds || [])
+          .map((id) => String(id).trim())
+          .filter((id) => id.length > 0);
+
+        if (filteredIds.length === 0) {
+          return res
+            .status(400)
+            .json({ message: "Nhà xe này chưa có khách hàng nào để gửi thông báo." });
+        }
+
+        receiversArray = filteredIds;
+        targetUserIds = filteredIds;
+      } else if (typeof receivers === "string") {
         receiversArray = receivers.split(",").map((r) => r.trim());
       } else if (Array.isArray(receivers)) {
         receiversArray = receivers;
-      } else {
+      }
+
+      if (!receiversArray || receiversArray.length === 0) {
         receiversArray = ["all"];
       }
 
@@ -53,6 +76,9 @@ export const createNotification = [
         sender,
         receivers: receiversArray,
         image: imageUrl,
+        partnerId: partnerId || "",
+        targetUserIds,
+        targetScope: targetScope || "general",
         createdAt: new Date(),
       });
 
@@ -74,10 +100,13 @@ export const createNotification = [
 export const getNotificationsByRole = async (req, res) => {
   try {
     const { role } = req.params;
+    const { userId } = req.query;
 
-    const list = await Notification.find({
-      $or: [{ receivers: role }, { receivers: "all" }],
-    }).sort({ createdAt: -1 });
+    const conditions = [{ receivers: "all" }];
+    if (role) conditions.push({ receivers: role });
+    if (userId) conditions.push({ receivers: String(userId) });
+
+    const list = await Notification.find({ $or: conditions }).sort({ createdAt: -1 });
 
     res.json(list);
   } catch (error) {
