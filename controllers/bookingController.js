@@ -66,6 +66,12 @@ export const bookTicket = async (req, res) => {
       feeAppliedAt: new Date(),
       paymentMethod: paymentMethod || "cash",
       status: paymentMethod === "cash" ? "paid" : "pending",
+      // Snapshot trip info
+      tenChuyen: trip.tenChuyen,
+      ngayKhoiHanh: trip.ngayKhoiHanh,
+      gioKhoiHanh: trip.gioKhoiHanh,
+      maTai: trip.maTai || "",
+      bienSo: trip.bienSo || "",
     });
 
     await newBooking.save();
@@ -551,6 +557,8 @@ export const getBookingsByPartner = async (req, res) => {
         tenChuyen: b.tenChuyen || b.tripId?.tenChuyen || "N/A",
         ngayKhoiHanh: b.ngayKhoiHanh || b.tripId?.ngayKhoiHanh || "",
         gioKhoiHanh: b.gioKhoiHanh || b.tripId?.gioKhoiHanh || "",
+        maTai: b.maTai || b.tripId?.maTai || "",
+        bienSo: b.bienSo || b.tripId?.bienSo || "",
 
         createdAt: b.createdAt,
         updatedAt: b.updatedAt,

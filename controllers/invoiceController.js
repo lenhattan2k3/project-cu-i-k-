@@ -10,6 +10,33 @@ const generateCheckInCode = (bookingId) => {
   return String(bookingId).slice(-8).toUpperCase();
 };
 
+const pickString = (...candidates) => {
+  for (const value of candidates) {
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (trimmed) return trimmed;
+    }
+  }
+  return undefined;
+};
+
+const buildTripInfoPayload = (tripDoc = {}, bookingDoc = {}) => {
+  const trip = typeof tripDoc.toObject === "function" ? tripDoc.toObject() : tripDoc;
+  return {
+    name: pickString(trip?.tenChuyen, bookingDoc.tenChuyen),
+    from: pickString(trip?.diemDi, trip?.tu),
+    to: pickString(trip?.diemDen, trip?.den),
+    departDate: pickString(trip?.ngayKhoiHanh, bookingDoc.ngayKhoiHanh),
+    departTime: pickString(trip?.gioKhoiHanh, bookingDoc.gioKhoiHanh),
+    vehicleType: pickString(trip?.vehicleType, trip?.loaiXe),
+    partnerName: pickString(trip?.tenNhaXe, trip?.nhaXe, bookingDoc.partnerName),
+    pickupNote: pickString(bookingDoc.diemDonChiTiet || ""),
+    image: pickString(trip?.hinhAnh),
+    tripCode: pickString(bookingDoc.maTai, trip?.maTai),
+    licensePlate: pickString(bookingDoc.bienSo, trip?.bienSo),
+  };
+};
+
 export const ensureInvoiceForBooking = async (bookingDoc) => {
   if (!bookingDoc) return null;
 
@@ -17,7 +44,21 @@ export const ensureInvoiceForBooking = async (bookingDoc) => {
   if (!bookingId) return null;
 
   const existing = await Invoice.findOne({ bookingId });
-  if (existing) return existing;
+  const tripInfoPayload = buildTripInfoPayload(bookingDoc.tripId, bookingDoc);
+  if (existing) {
+    const shouldUpdateTripInfo = Object.entries(tripInfoPayload).some(([key, value]) => {
+      if (!value) return false;
+      return !existing.tripInfo?.[key];
+    });
+
+    if (shouldUpdateTripInfo) {
+      existing.tripInfo = { ...(existing.tripInfo || {}), ...tripInfoPayload };
+      existing.markModified("tripInfo");
+      await existing.save();
+    }
+
+    return existing;
+  }
 
   if (!bookingDoc.tripId?.tenChuyen) {
     try {
@@ -41,15 +82,7 @@ export const ensureInvoiceForBooking = async (bookingDoc) => {
     passengerName: bookingDoc.hoTen,
     passengerPhone: bookingDoc.sdt,
     checkInCode: bookingDoc.checkInCode || generateCheckInCode(bookingId),
-    tripInfo: {
-      name: trip?.tenChuyen,
-      from: trip?.diemDi,
-      to: trip?.diemDen,
-      departDate: trip?.ngayKhoiHanh,
-      departTime: trip?.gioKhoiHanh,
-      vehicleType: trip?.loaiXe,
-      partnerName: trip?.tenNhaXe,
-    },
+    tripInfo: tripInfoPayload,
     metadata: {
       voucherCode: bookingDoc.voucherCode || null,
       discountAmount: bookingDoc.discountAmount || 0,

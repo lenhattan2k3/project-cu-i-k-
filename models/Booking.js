@@ -93,6 +93,14 @@ feeApplied: {
       type: String,
       default: ""
     },
+    maTai: {
+      type: String,
+      default: ""
+    },
+    bienSo: {
+      type: String,
+      default: ""
+    },
      feeApplied: {
       type: Number,
       default: 0,

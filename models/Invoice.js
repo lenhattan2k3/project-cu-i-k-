@@ -9,6 +9,10 @@ const tripInfoSchema = new mongoose.Schema(
     departTime: String,
     vehicleType: String,
     partnerName: String,
+    pickupNote: String,
+    image: String,
+    tripCode: String,
+    licensePlate: String,
   },
   { _id: false }
 );

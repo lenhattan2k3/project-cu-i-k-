@@ -69,7 +69,7 @@ export const createPayment = async (req, res) => {
     // Use the v2 paymentRequests API provided by the SDK
     const paymentLink = await payos.paymentRequests.create({
       orderCode,
-      amount,
+      amount: Math.round(amount), // Ensure integer
       description,
       returnUrl,
       cancelUrl,
@@ -79,7 +79,7 @@ export const createPayment = async (req, res) => {
       userId,
       bookingId,
       orderCode,
-      amount,
+      amount: Math.round(amount),
       method: "payos",
       status: "pending",
       payosData: paymentLink,
@@ -104,7 +104,7 @@ export const createPayment = async (req, res) => {
     res.json({ success: true, paymentInfo, payment, paymentLink: checkoutUrl });
   } catch (err) {
     console.error("PayOS Create Payment Error:", err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: err.message, stack: process.env.NODE_ENV === 'development' ? err.stack : undefined });
   }
 };
 
@@ -211,6 +211,10 @@ export const confirmPaymentReturn = async (req, res) => {
       }
 
       const booking = await markBookingPaidFromPayment(payment, { finalAmount: amountNumber });
+      
+      // Also attempt to settle withdrawal if this payment was for a withdrawal
+      await settleWithdrawalFromPayment(payment);
+
       return res.json({ success: true, paymentStatus: "paid", booking });
     }
 

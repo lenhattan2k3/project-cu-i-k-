@@ -1,5 +1,6 @@
 import Trip from "../models/tripModel.js";
 import Booking from "../models/Booking.js";
+import NhaXe from "../models/NhaXe.js";
 
 // 🔍 Lấy tất cả chuyến xe
 export const getAllTrips = async (req, res) => {
@@ -43,11 +44,14 @@ export const getAllTrips = async (req, res) => {
 
 // 🆕 Tạo chuyến xe mới
 // 🆕 Tạo chuyến xe mới
+const normalizeCarrierName = (value = "") => value.trim();
+
 export const createTrip = async (req, res) => {
   try {
     const {
-      tenChuyen,
       maTai,
+      bienSo,
+      tienIch,
       loaiXe,
       hangXe,
       mauSac,
@@ -58,26 +62,56 @@ export const createTrip = async (req, res) => {
       giaVe,
       soLuongGhe,
       nhaXe,
-      partnerId,   // Firebase UID
+      partnerId, // Firebase UID
       trangThai,
       hinhAnh,
     } = req.body;
 
-    // Kiểm tra dữ liệu đầu vào
-    if (!tenChuyen || !tu || !den || !giaVe || !soLuongGhe || !nhaXe) {
+    if (!tu || !den || !giaVe || !soLuongGhe) {
       return res.status(400).json({ message: "Vui lòng nhập đủ thông tin bắt buộc" });
     }
 
-    // ❗ BẮT BUỘC: partnerId phải có
-    if (!partnerId || partnerId.trim() === "") {
+    const normalizedPartnerId = String(partnerId || "").trim();
+    if (!normalizedPartnerId) {
       return res.status(400).json({
         message: "Thiếu partnerId (Firebase UID của nhà xe)!",
       });
     }
 
+    const requestedName = normalizeCarrierName(nhaXe);
+    let carrierRecord = await NhaXe.findOne({ partnerId: normalizedPartnerId });
+
+    if (!carrierRecord) {
+      if (!requestedName) {
+        return res.status(400).json({
+          message: "Chưa cấu hình tên nhà xe cho tài khoản này. Vui lòng cung cấp tên hợp lệ lần đầu tiên hoặc cập nhật hồ sơ đối tác.",
+        });
+      }
+      carrierRecord = await NhaXe.create({
+        partnerId: normalizedPartnerId,
+        name: requestedName,
+        slug: requestedName.toLowerCase().replace(/\s+/g, "-"),
+      });
+    } else if (requestedName && requestedName !== carrierRecord.name) {
+      return res.status(400).json({
+        message: `Tên nhà xe cho tài khoản này đã được cố định là "${carrierRecord.name}". Không thể tự ý thay đổi khi tạo chuyến.`,
+      });
+    }
+
+    const resolvedCarrierName = carrierRecord?.name || requestedName;
+
+    const tripName = carrierRecord?.name;
+    if (!tripName) {
+      return res.status(400).json({
+        message: "Không xác định được tên chuyến cho tài khoản này. Vui lòng liên hệ quản trị viên.",
+      });
+    }
+
     const newTrip = new Trip({
-      tenChuyen,
+      tenChuyen: tripName,
       maTai,
+      bienSo,
+      tienIch,
       loaiXe,
       hangXe,
       mauSac,
@@ -87,8 +121,8 @@ export const createTrip = async (req, res) => {
       gioKhoiHanh,
       giaVe,
       soLuongGhe,
-      nhaXe,
-      partnerId: String(partnerId), // đảm bảo luôn string
+      nhaXe: resolvedCarrierName,
+      partnerId: normalizedPartnerId,
       trangThai,
       hinhAnh,
     });
@@ -97,7 +131,7 @@ export const createTrip = async (req, res) => {
     res.status(201).json(newTrip);
   } catch (error) {
     console.error("❌ Lỗi khi tạo chuyến xe:", error);
-    res.status(500).json({ message: "Lỗi khi tạo chuyến xe", error });
+    res.status(500).json({ message: "Lỗi khi tạo chuyến xe", error: error.message });
   }
 };
 
@@ -105,11 +139,35 @@ export const createTrip = async (req, res) => {
 export const updateTrip = async (req, res) => {
   try {
     const { id } = req.params;
-    const updatedTrip = await Trip.findByIdAndUpdate(id, req.body, {
+    const existingTrip = await Trip.findById(id);
+    if (!existingTrip) {
+      return res.status(404).json({ message: "Không tìm thấy chuyến xe" });
+    }
+
+    if (req.body.partnerId && req.body.partnerId !== existingTrip.partnerId) {
+      return res.status(400).json({ message: "Không thể thay đổi chủ sở hữu của chuyến" });
+    }
+
+    if (req.body.nhaXe && normalizeCarrierName(req.body.nhaXe) !== existingTrip.nhaXe) {
+      return res.status(400).json({ message: "Tên nhà xe đã bị khóa theo tài khoản, không thể chỉnh sửa tại đây" });
+    }
+
+    if (req.body.tenChuyen && normalizeCarrierName(req.body.tenChuyen) !== existingTrip.tenChuyen) {
+      return res.status(400).json({ message: "Tên chuyến được gắn cố định với tài khoản, không thể chỉnh sửa" });
+    }
+
+    const updateData = {
+      ...req.body,
+      tenChuyen: existingTrip.tenChuyen,
+      nhaXe: existingTrip.nhaXe,
+      partnerId: existingTrip.partnerId,
+    };
+
+    const updatedTrip = await Trip.findByIdAndUpdate(id, updateData, {
       new: true,
       runValidators: true,
     });
-    if (!updatedTrip) return res.status(404).json({ message: "Không tìm thấy chuyến xe" });
+
     res.status(200).json(updatedTrip);
   } catch (error) {
     console.error("❌ Lỗi khi cập nhật chuyến xe:", error);

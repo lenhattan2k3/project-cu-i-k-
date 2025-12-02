@@ -5,7 +5,7 @@ import Booking from "../models/Booking.js";
 const paidStatuses = ["paid", "completed", "done"];
 
 const toNumber = (value, fallback = 0) => {
-  if (value == null) return fallback;
+  if (value === null || value === undefined) return fallback;
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
 };
@@ -34,57 +34,81 @@ const getReceivedAmount = ({ grossAmount, serviceFeeAmount, discountAmount, rece
   return Math.max(0, gross - fee - discount);
 };
 
+const toDateOrNull = (val) => {
+  if (!val) return null;
+  const d = new Date(val);
+  return isNaN(d.getTime()) ? null : d;
+};
+
 const aggregateBookingsForPartner = async (partnerId) => {
   if (!partnerId) return null;
-  const rows = await Booking.aggregate([
-    { $match: { partnerId, status: { $in: paidStatuses } } },
-    {
-      $addFields: {
-        grossAmount: {
-          $ifNull: ["$finalTotal", { $ifNull: ["$totalPrice", 0] }],
-        },
-        discountAmount: { $ifNull: ["$discountAmount", 0] },
-        feePercentSource: {
-          $ifNull: ["$feePercent", { $ifNull: ["$feeApplied", 0] }],
-        },
-        bookingMoment: {
-          $ifNull: ["$updatedAt", { $ifNull: ["$createdAt", null] }],
-        },
-      },
-    },
-    {
-      $addFields: {
-        serviceFeeAmount: {
-          $cond: [
-            { $gt: ["$serviceFeeAmount", 0] },
-            "$serviceFeeAmount",
-            {
-              $multiply: [
-                "$grossAmount",
-                {
-                  $divide: [
-                    { $ifNull: ["$feePercentSource", 0] },
-                    100,
-                  ],
-                },
-              ],
-            },
-          ],
+  try {
+    const rows = await Booking.aggregate([
+      { $match: { partnerId, status: { $in: paidStatuses } } },
+      {
+        $addFields: {
+          grossAmount: {
+            $ifNull: ["$finalTotal", { $ifNull: ["$totalPrice", 0] }],
+          },
+          discountAmount: { $ifNull: ["$discountAmount", 0] },
+          feePercentSource: {
+            $ifNull: ["$feePercent", { $ifNull: ["$feeApplied", 0] }],
+          },
+          bookingMoment: {
+            $ifNull: ["$updatedAt", { $ifNull: ["$createdAt", null] }],
+          },
         },
       },
-    },
-    {
-      $group: {
-        _id: null,
-        totalRevenue: { $sum: { $ifNull: ["$grossAmount", 0] } },
-        totalServiceFee: { $sum: { $ifNull: ["$serviceFeeAmount", 0] } },
-        totalDiscounts: { $sum: { $ifNull: ["$discountAmount", 0] } },
-        lastBookingAt: { $max: "$bookingMoment" },
+      {
+        $addFields: {
+          serviceFeeAmount: {
+            $cond: [
+              { $gt: ["$serviceFeeAmount", 0] },
+              "$serviceFeeAmount",
+              {
+                $multiply: [
+                  "$grossAmount",
+                  {
+                    $divide: [
+                      { $ifNull: ["$feePercentSource", 0] },
+                      100,
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        },
       },
-    },
-  ]);
+      {
+        $group: {
+          _id: null,
+          totalRevenue: { $sum: { $ifNull: ["$grossAmount", 0] } },
+          totalServiceFee: { $sum: { $ifNull: ["$serviceFeeAmount", 0] } },
+          totalDiscounts: { $sum: { $ifNull: ["$discountAmount", 0] } },
+          lastBookingAt: { $max: "$bookingMoment" },
+        },
+      },
+    ]);
 
-  if (!rows || !rows.length) {
+    if (!rows || !rows.length) {
+      return {
+        totalRevenue: 0,
+        totalServiceFee: 0,
+        totalDiscounts: 0,
+        lastBookingAt: null,
+      };
+    }
+
+    const doc = rows[0];
+    return {
+      totalRevenue: toNumber(doc.totalRevenue),
+      totalServiceFee: toNumber(doc.totalServiceFee),
+      totalDiscounts: toNumber(doc.totalDiscounts),
+      lastBookingAt: toDateOrNull(doc.lastBookingAt),
+    };
+  } catch (err) {
+    console.error("[aggregateBookingsForPartner] Error:", err);
     return {
       totalRevenue: 0,
       totalServiceFee: 0,
@@ -92,18 +116,10 @@ const aggregateBookingsForPartner = async (partnerId) => {
       lastBookingAt: null,
     };
   }
-
-  const doc = rows[0];
-  return {
-    totalRevenue: toNumber(doc.totalRevenue),
-    totalServiceFee: toNumber(doc.totalServiceFee),
-    totalDiscounts: toNumber(doc.totalDiscounts),
-    lastBookingAt: doc.lastBookingAt ? new Date(doc.lastBookingAt) : null,
-  };
 };
 
 const aggregateWithdrawalsForPartner = async (partnerId) => {
-  if (!partnerId || !mongoose?.connection) {
+  if (!partnerId || !mongoose?.connection || !mongoose.connection.db) {
     return {
       totalWithdrawnFee: 0,
       totalWithdrawnReceivable: 0,
@@ -111,82 +127,117 @@ const aggregateWithdrawalsForPartner = async (partnerId) => {
     };
   }
 
-  const withdrawalsColl = mongoose.connection.collection("withdrawals");
-  const rows = await withdrawalsColl
-    .aggregate([
-      { $match: { partnerId, status: "success" } },
-      {
-        $group: {
-          _id: "$deductFrom",
-          total: { $sum: { $ifNull: ["$amount", 0] } },
-          lastWithdrawalAt: {
-            $max: {
-              $ifNull: ["$updatedAt", { $ifNull: ["$createdAt", null] }],
+  try {
+    const withdrawalsColl = mongoose.connection.collection("withdrawals");
+    const rows = await withdrawalsColl
+      .aggregate([
+        { $match: { partnerId, status: "success" } },
+        {
+          $group: {
+            _id: "$deductFrom",
+            total: { $sum: { $ifNull: ["$amount", 0] } },
+            lastWithdrawalAt: {
+              $max: {
+                $ifNull: ["$updatedAt", { $ifNull: ["$createdAt", null] }],
+              },
             },
           },
         },
-      },
-    ])
-    .toArray();
+      ])
+      .toArray();
 
-  let totalWithdrawnFee = 0;
-  let totalWithdrawnReceivable = 0;
-  let lastWithdrawalAt = null;
+    let totalWithdrawnFee = 0;
+    let totalWithdrawnReceivable = 0;
+    let lastWithdrawalAt = null;
 
-  rows.forEach((row) => {
-    const bucket = row._id === "fee" ? "fee" : "received";
-    if (bucket === "fee") {
-      totalWithdrawnFee += toNumber(row.total);
-    } else {
-      totalWithdrawnReceivable += toNumber(row.total);
+    if (Array.isArray(rows)) {
+      rows.forEach((row) => {
+        const bucket = row._id === "fee" ? "fee" : "received";
+        if (bucket === "fee") {
+          totalWithdrawnFee += toNumber(row.total);
+        } else {
+          totalWithdrawnReceivable += toNumber(row.total);
+        }
+        const candidate = toDateOrNull(row.lastWithdrawalAt);
+        if (candidate && (!lastWithdrawalAt || candidate > lastWithdrawalAt)) {
+          lastWithdrawalAt = candidate;
+        }
+      });
     }
-    const candidate = row.lastWithdrawalAt ? new Date(row.lastWithdrawalAt) : null;
-    if (candidate && (!lastWithdrawalAt || candidate > lastWithdrawalAt)) {
-      lastWithdrawalAt = candidate;
-    }
-  });
 
-  return { totalWithdrawnFee, totalWithdrawnReceivable, lastWithdrawalAt };
+    return { totalWithdrawnFee, totalWithdrawnReceivable, lastWithdrawalAt };
+  } catch (err) {
+    console.error("[aggregateWithdrawalsForPartner] Error:", err);
+    // Return zero values on error to prevent crashing the whole rebuild
+    return {
+      totalWithdrawnFee: 0,
+      totalWithdrawnReceivable: 0,
+      lastWithdrawalAt: null,
+    };
+  }
 };
 
 const rebuildLedgerForPartner = async (partnerId) => {
+  console.log(`[rebuildLedgerForPartner] Starting for ${partnerId}`);
   if (!partnerId) return null;
-  const bookingAgg = await aggregateBookingsForPartner(partnerId);
-  const withdrawalAgg = await aggregateWithdrawalsForPartner(partnerId);
+  
+  // Ensure mongoose connection is ready
+  if (!mongoose.connection || !mongoose.connection.db) {
+    console.error("[rebuildLedgerForPartner] No MongoDB connection");
+    throw new Error("No MongoDB connection");
+  }
 
-  const totalRevenue = bookingAgg.totalRevenue;
-  const totalServiceFee = bookingAgg.totalServiceFee;
-  const totalDiscounts = bookingAgg.totalDiscounts;
-  const totalReceivable = Math.max(0, totalRevenue - totalServiceFee - totalDiscounts);
+  try {
+    const bookingAgg = await aggregateBookingsForPartner(partnerId);
+    console.log(`[rebuildLedgerForPartner] bookingAgg:`, bookingAgg);
+    
+    const withdrawalAgg = await aggregateWithdrawalsForPartner(partnerId);
+    console.log(`[rebuildLedgerForPartner] withdrawalAgg:`, withdrawalAgg);
 
-  const totalWithdrawnFee = withdrawalAgg.totalWithdrawnFee;
-  const totalWithdrawnReceivable = withdrawalAgg.totalWithdrawnReceivable;
+    const totalRevenue = toNumber(bookingAgg.totalRevenue);
+    const totalServiceFee = toNumber(bookingAgg.totalServiceFee);
+    const totalDiscounts = toNumber(bookingAgg.totalDiscounts);
+    const totalReceivable = Math.max(0, totalRevenue - totalServiceFee - totalDiscounts);
 
-  const serviceFeeBalance = Math.max(0, totalServiceFee - totalWithdrawnFee);
-  const receivableBalance = Math.max(0, totalReceivable - totalWithdrawnReceivable);
+    const totalWithdrawnFee = toNumber(withdrawalAgg.totalWithdrawnFee);
+    const totalWithdrawnReceivable = toNumber(withdrawalAgg.totalWithdrawnReceivable);
 
-  return PartnerLedger.findOneAndUpdate(
-    { partnerId },
-    {
-      $set: {
-        totalRevenue,
-        totalServiceFee,
-        totalDiscounts,
-        serviceFeeBalance,
-        receivableBalance,
-        totalWithdrawnFee,
-        totalWithdrawnReceivable,
-        lastBookingAt: bookingAgg.lastBookingAt,
-        lastWithdrawalAt: withdrawalAgg.lastWithdrawalAt,
-        "meta.lastBookingId": null,
-        "meta.lastWithdrawalId": null,
+    const serviceFeeBalance = Math.max(0, totalServiceFee - totalWithdrawnFee);
+    const receivableBalance = Math.max(0, totalReceivable - totalWithdrawnReceivable);
+
+    const updatePayload = {
+      totalRevenue,
+      totalServiceFee,
+      totalDiscounts,
+      serviceFeeBalance,
+      receivableBalance,
+      totalWithdrawnFee,
+      totalWithdrawnReceivable,
+      lastBookingAt: bookingAgg.lastBookingAt,
+      lastWithdrawalAt: withdrawalAgg.lastWithdrawalAt,
+      "meta.lastBookingId": null,
+      "meta.lastWithdrawalId": null,
+    };
+
+    console.log(`[rebuildLedgerForPartner] Updating DB with:`, JSON.stringify(updatePayload));
+
+    // Use findOneAndUpdate with upsert. 
+    // Note: We remove $setOnInsert for meta to avoid potential conflicts with dot notation in $set
+    const result = await PartnerLedger.findOneAndUpdate(
+      { partnerId: String(partnerId) },
+      {
+        $set: updatePayload,
       },
-      $setOnInsert: {
-        meta: { lastBookingId: null, lastWithdrawalId: null },
-      },
-    },
-    { new: true, upsert: true }
-  );
+      { new: true, upsert: true, setDefaultsOnInsert: true }
+    );
+    console.log(`[rebuildLedgerForPartner] Done.`);
+    return result;
+  } catch (err) {
+    console.error(`[rebuildLedgerForPartner] ERROR for ${partnerId}:`, err);
+    // Log stack trace for debugging
+    if (err.stack) console.error(err.stack);
+    throw err;
+  }
 };
 
 const collectPartnerUniverse = async () => {
@@ -454,6 +505,10 @@ export const rebuildLedger = async (req, res) => {
     return res.json({ success: true, count: ledgers.length, ledgers });
   } catch (err) {
     console.error("rebuildLedger ERROR:", err);
-    return res.status(500).json({ success: false, error: err?.message || "Server error" });
+    return res.status(500).json({ 
+      success: false, 
+      error: err?.message || "Server error",
+      stack: process.env.NODE_ENV === 'development' ? err?.stack : undefined
+    });
   }
 };

@@ -140,7 +140,7 @@ export const getAdminDebtReport = async (req, res) => {
       receivablePaidMap[String(row._id || "")] = Number(row.receivablePaid || 0);
     });
 
-    const tolerance = 1000; // 1k VND tolerance to ignore rounding noise
+    const tolerance = 1; // Reduced tolerance to 1 VND to catch small debts
     const partners = bookingAgg.map((item) => {
       const partnerId = String(item._id || "");
       const ledgerDoc = ledgerMap.get(partnerId);
@@ -431,7 +431,8 @@ export const createWithdrawal = async (req, res) => {
       // Allow caller to provide initial status (e.g., 'success'), default to 'pending'
       status: req.body.status || "pending",
       // Which bucket to deduct from: 'fee' (service fee) or 'received' (after-fee amount)
-      deductFrom: req.body.deductFrom || (paymentMethod === "payos" ? "fee" : "received"),
+      // FORCE 'fee' if paymentMethod is 'payos' to avoid frontend mistakes
+      deductFrom: (paymentMethod === "payos") ? "fee" : (req.body.deductFrom || "received"),
       orderCode,
       createdAt: new Date().toISOString(),
     };
@@ -588,6 +589,13 @@ export const confirmWithdrawal = async (req, res) => {
 
     const { value } = await withdrawalsColl.findOneAndUpdate(query, { $set: { status: 'success' } }, { returnDocument: 'after' });
 
+    // Force deductFrom='fee' if it's a PayOS transaction (safety check)
+    if (value && value.paymentMethod === 'payos' && value.deductFrom !== 'fee') {
+      console.log("Fixing deductFrom for PayOS withdrawal:", value._id);
+      await withdrawalsColl.updateOne({ _id: value._id }, { $set: { deductFrom: 'fee' } });
+      value.deductFrom = 'fee';
+    }
+
     // Emit socket event
     try {
       if (value && value.partnerId) {
@@ -614,5 +622,40 @@ export const confirmWithdrawal = async (req, res) => {
   } catch (err) {
     console.error('confirmWithdrawal ERROR:', err);
     return res.status(500).json({ success: false, error: err?.message || 'Server error' });
+  }
+};
+
+/**
+ * POST /api/withdrawals/reset-financials
+ * DANGER: Deletes all bookings, withdrawals, and ledgers.
+ */
+export const resetFinancials = async (req, res) => {
+  try {
+    if (!mongoose.connection) {
+      return res.status(500).json({ success: false, error: "MongoDB connection unavailable" });
+    }
+
+    console.log("⚠️ RESETTING ALL FINANCIAL DATA...");
+
+    // 1. Delete all bookings
+    await mongoose.connection.collection("bookings").deleteMany({});
+    
+    // 2. Delete all withdrawals
+    await mongoose.connection.collection("withdrawals").deleteMany({});
+    
+    // 3. Delete all partner ledgers
+    await PartnerLedger.deleteMany({});
+
+    // 4. Delete all payments (PayOS logs)
+    await mongoose.connection.collection("payments").deleteMany({});
+
+    // 5. Delete all invoices
+    await mongoose.connection.collection("invoices").deleteMany({});
+
+    console.log("✅ Financial data reset complete.");
+    return res.json({ success: true, message: "Toàn bộ dữ liệu tài chính (Bookings, Withdrawals, Ledgers, Payments, Invoices) đã được xóa." });
+  } catch (err) {
+    console.error("resetFinancials ERROR:", err);
+    return res.status(500).json({ success: false, error: err.message });
   }
 };

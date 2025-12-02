@@ -4,6 +4,8 @@ const tripSchema = new mongoose.Schema(
   {
     tenChuyen: { type: String, required: true },
     maTai: { type: String, default: "" },      // Mã tài
+    bienSo: { type: String, default: "" },     // Biển số xe
+    tienIch: { type: String, default: "" },    // Tiện ích (Wifi, Điều hòa...)
     loaiXe: { type: String, default: "" },     // Loại xe
     hangXe: { type: String, default: "" },     // Hãng xe
     mauSac: { type: String, default: "" },     // Màu sắc
