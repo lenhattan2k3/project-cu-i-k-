@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState, useMemo } from "react";
+import type { ReactNode } from "react";
 import { getAllTrips } from "../../api/tripApi";
 import { bookTicket, getBookedSeats } from "../../api/bookingApi";
+import { getAllReviews, type Review } from "../../api/reviewApi";
+import { getPromotions } from "../../api/promotionsApi";
+import { FaBed, FaChair, FaStar, FaTicketAlt } from "react-icons/fa";
 
 // --- CSS STYLES (Giao diện Full màn hình & Hiện đại) ---
 const styles = `
@@ -117,20 +121,25 @@ const styles = `
 }
   /* TRIP CARD */
   .trip-card { 
+  
     background: white; border-radius: 16px; box-shadow: 0 2px 12px rgba(0,0,0,0.04); 
     display: flex; margin-bottom: 25px; overflow: hidden; transition: all 0.2s;
-    border: 1px solid rgba(0,0,0,0.05); min-height: 220px; flex-shrink: 0;
+    border: 1px solid rgba(0,0,0,0.05); min-height: 180px; flex-shrink: 0;
   }
   .trip-card:hover { box-shadow: 0 10px 25px rgba(0,0,0,0.1); transform: translateY(-2px); border-color: rgba(36, 116, 229, 0.2); }
   
-  .card-left { width: 280px; position: relative; flex-shrink: 0; }
+  .card-left { width: 240px; position: relative; flex-shrink: 0; }
   .card-img { width: 100%; height: 100%; object-fit: cover; }
   .badge-instant { position: absolute; top: 15px; left: 15px; background: var(--green-badge); color: white; font-size: 12px; font-weight: 700; padding: 6px 12px; border-radius: 6px; box-shadow: 0 4px 10px rgba(0,182,3,0.3); }
   
-  .card-middle { flex: 1; padding: 25px 30px; display: flex; flex-direction: column; justify-content: center; border-right: 1px dashed #e0e0e0; }
+  .card-middle { flex: 1; padding: 20px 25px; display: flex; flex-direction: column; justify-content: center; border-right: 1px dashed #e0e0e0; }
   .bus-title { font-size: 20px; font-weight: 800; color: #222; margin-bottom: 8px; display: flex; align-items: center; gap: 10px; }
   .rating-badge { background: #eef4ff; color: var(--primary-blue); font-size: 13px; padding: 4px 8px; border-radius: 6px; font-weight: 700; }
   .bus-type { font-size: 14px; color: #666; margin-bottom: 25px; background: #f5f7fa; display: inline-block; padding: 6px 12px; border-radius: 6px; font-weight: 500; }
+  .vehicle-type-badge { display: flex; align-items: center; gap: 12px; border-radius: 16px; padding: 12px 16px; font-weight: 700; margin-bottom: 18px; border: 1px solid transparent; }
+  .vehicle-type-icon { width: 42px; height: 42px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 20px; }
+  .vehicle-type-label { font-size: 15px; margin: 0; letter-spacing: 0.3px; }
+  .vehicle-type-desc { font-size: 12px; margin: 2px 0 0; font-weight: 500; opacity: 0.85; }
   
   .timeline { padding-left: 20px; border-left: 2px dashed #d0d7de; margin-left: 8px; position: relative; }
   .timeline-item { position: relative; margin-bottom: 25px; }
@@ -142,7 +151,7 @@ const styles = `
   .loc { font-size: 16px; color: #555; font-weight: 600; }
   .duration { font-size: 13px; color: #888; margin: -12px 0 8px 100px; font-weight: 500; }
 
-  .card-right { width: 240px; padding: 25px; display: flex; flex-direction: column; justify-content: space-between; align-items: flex-end; text-align: right; background: #fcfcfc; }
+  .card-right { width: 220px; padding: 20px; display: flex; flex-direction: column; justify-content: space-between; align-items: flex-end; text-align: right; background: #fcfcfc; }
   .price-text { font-size: 28px; font-weight: 800; color: var(--primary-blue); letter-spacing: -0.5px; }
   .price-sub { font-size: 12px; color: #888; margin-bottom: auto; font-weight: 500; }
   .seats-left { font-size: 13px; color: #e67e22; font-weight: 700; margin-bottom: 12px; background: #fff8f0; padding: 5px 10px; border-radius: 4px; }
@@ -180,10 +189,18 @@ const styles = `
     .main-container { padding: 20px; flex-direction: column; height: auto; overflow: visible; }
     .sidebar { width: 100%; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px; height: auto; }
     .trip-column { height: auto; overflow-y: visible; padding-right: 0; }
-    .trip-card { flex-direction: column; height: auto; }
-    .card-left { width: 100%; height: 200px; }
-    .card-middle { border-right: none; border-bottom: 1px dashed #e0e0e0; }
-    .card-right { width: 100%; border-left: none; flex-direction: row; justify-content: space-between; align-items: center; padding: 20px 30px; box-sizing: border-box; }
+  }
+
+  @media (max-width: 768px) {
+    .sidebar { grid-template-columns: 1fr; }
+   .trip-card {
+  min-height: 10px;
+}
+
+
+    .card-left { width: 100%; height: 160px; }
+    .card-middle { border-right: none; border-bottom: 1px dashed #dbc8c8ff; padding: 20px; }
+    .card-right { width: 100%; border-left: none; flex-direction: row; justify-content: space-between; align-items: center; padding: 15px 20px; box-sizing: border-box; }
     .btn-select { width: auto; }
   }
 `;
@@ -199,6 +216,7 @@ interface Trip {
   nhaXe: string;
   hinhAnh?: string;
   maTai?: string;
+  bienSo?: string;
   loaiXe?: string;
   hangXe?: string;
   mauSac?: string;
@@ -231,6 +249,46 @@ const NHA_XE_MAPPING: Record<string, string> = {
 };
 const getNhaXeName = (id: string) => NHA_XE_MAPPING[id] || id;
 
+type VehicleTypeVariant = "giuong" | "ghe";
+
+interface VehicleTypeMeta {
+  label: string;
+  variant: VehicleTypeVariant;
+  color: string;
+  bg: string;
+  iconBg: string;
+  border: string;
+  subLabel: string;
+  icon: ReactNode;
+}
+
+const getVehicleTypeMeta = (loaiXe?: string): VehicleTypeMeta => {
+  const normalized = (loaiXe || "").toLowerCase();
+  const isSleeper = normalized.includes("giường");
+  if (isSleeper) {
+    return {
+      label: loaiXe?.trim() || "Giường nằm",
+      variant: "giuong",
+      color: "#6d28d9",
+      bg: "rgba(124,58,237,0.08)",
+      iconBg: "#ede9fe",
+      border: "rgba(109,40,217,0.25)",
+      subLabel: "Giường nằm êm ái, lối đi giữa",
+      icon: <FaBed />,
+    };
+  }
+  return {
+    label: loaiXe?.trim() || "Ghế ngồi",
+    variant: "ghe",
+    color: "#0f766e",
+    bg: "rgba(13,148,136,0.08)",
+    iconBg: "#ecfdf5",
+    border: "rgba(13,148,136,0.25)",
+    subLabel: "Ghế ngồi 2+2 thoáng rộng",
+    icon: <FaChair />,
+  };
+};
+
 export default function SearchTrip() {
   const [trips, setTrips] = useState<Trip[]>([]);
   
@@ -253,6 +311,36 @@ export default function SearchTrip() {
   const [hoTen, setHoTen] = useState("");
   const [sdt, setSdt] = useState("");
   const pollingRef = useRef<number | null>(null);
+  const selectedTripMeta = selectedTrip ? getVehicleTypeMeta(selectedTrip.loaiXe) : null;
+
+  // --- STATE & LOGIC CHO MODAL CHI TIẾT (TABS) ---
+  const [activeTab, setActiveTab] = useState<'info' | 'reviews' | 'vouchers'>('info');
+  const [reviews, setReviews] = useState<Review[]>([]);
+  const [vouchers, setVouchers] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (showDetailModal && selectedTrip) {
+      setActiveTab('info');
+      
+      // Fetch Reviews
+      getAllReviews().then(data => {
+        if (Array.isArray(data)) {
+          // Lọc đánh giá theo tripId
+          const tripReviews = data.filter((r: Review) => r.tripId === selectedTrip._id);
+          setReviews(tripReviews);
+        }
+      }).catch(err => console.error("Lỗi tải đánh giá:", err));
+
+      // Fetch Vouchers (theo Nhà xe)
+      if (selectedTrip.nhaXe) {
+        getPromotions(selectedTrip.nhaXe).then(data => {
+           setVouchers(Array.isArray(data) ? data : []);
+        }).catch(err => console.error("Lỗi tải voucher:", err));
+      } else {
+        setVouchers([]);
+      }
+    }
+  }, [showDetailModal, selectedTrip]);
 
   // --- LOGIC: FETCH DATA (GIỮ NGUYÊN) ---
   const fetchTrips = async () => {
@@ -392,7 +480,7 @@ export default function SearchTrip() {
 
   // --- RENDER SEAT MAP HELPER ---
   const renderSeatMap = (trip: Trip) => {
-    const total = trip.tongSoGhe || 20;
+    const total = Math.max(1, trip.soLuongGhe || trip.tongSoGhe || trip.availableSeats || 20);
     const isSingle = total <= 16;
     const perFloor = isSingle ? total : Math.ceil(total / 2);
 
@@ -507,7 +595,9 @@ export default function SearchTrip() {
               <p style={{color: "#666"}}>Hãy thử thay đổi tiêu chí tìm kiếm của bạn.</p>
             </div>
           ) : (
-            displayedTrips.map(trip => (
+            displayedTrips.map(trip => {
+              const vehicleMeta = getVehicleTypeMeta(trip.loaiXe);
+              return (
               <div key={trip._id} className="trip-card">
                 <div className="card-left">
                    <img src={trip.hinhAnh || "https://via.placeholder.com/300x200?text=No+Image"} alt={trip.nhaXe} className="card-img" />
@@ -516,24 +606,31 @@ export default function SearchTrip() {
 
                 <div className="card-middle">
                    <div style={{fontSize: '13px', color: '#64748b', fontWeight: 600, marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px'}}>{trip.tenChuyen}</div>
-                   <div className="bus-title">{getNhaXeName(trip.nhaXe)} <span className="rating-badge">★ 4.8</span></div>
+                   <div className="bus-title">{getNhaXeName(trip.nhaXe)}</div>
+                   <div className="vehicle-type-badge" style={{ background: vehicleMeta.bg, color: vehicleMeta.color, borderColor: vehicleMeta.border }}>
+                     <span className="vehicle-type-icon" style={{ background: vehicleMeta.iconBg, color: vehicleMeta.color }}>{vehicleMeta.icon}</span>
+                     <div>
+                       <div className="vehicle-type-label">{vehicleMeta.label}</div>
+                       <div className="vehicle-type-desc">{vehicleMeta.subLabel}</div>
+                     </div>
+                   </div>
                    
                    <div style={{display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '15px'}}>
-                      <div className="bus-type">{trip.loaiXe || "Ghế ngồi"}</div>
                       <div className="bus-type" style={{background: '#eff6ff', color: '#2563eb'}}>📅 {trip.ngayKhoiHanh}</div>
                       {trip.hangXe && <div className="bus-type" style={{background: '#fff7ed', color: '#ea580c'}}>🚌 {trip.hangXe}</div>}
-                      {trip.maTai && <div className="bus-type" style={{background: '#f0fdf4', color: '#16a34a'}}>🚗 {trip.maTai}</div>}
+                      {trip.maTai && <div className="bus-type" style={{background: '#f3f4f6', color: '#4b5563'}}>🔢 {trip.maTai}</div>}
+                      {trip.bienSo && <div className="bus-type" style={{background: '#f0fdf4', color: '#16a34a'}}>🚗 {trip.bienSo}</div>}
                       {trip.mauSac && <div className="bus-type" style={{background: '#f8fafc', color: '#475569'}}>🎨 {trip.mauSac}</div>}
                    </div>
 
                    <div className="timeline">
                       <div className="timeline-item"><div className="dot start"></div><div className="time-loc"><span className="time">{trip.gioKhoiHanh}</span><span className="loc">• {trip.tu}</span></div></div>
-                      <div className="duration">~ 5h 30m • Đường cao tốc</div>
+                      {/* <div className="duration">~ 5h 30m • Đường cao tốc</div> */}
                       <div className="timeline-item"><div className="dot end"></div><div className="time-loc"><span className="time">--:--</span><span className="loc">• {trip.den}</span></div></div>
                    </div>
 
                    <div style={{marginTop: '15px', paddingTop: '15px', borderTop: '1px dashed #e2e8f0', display: 'flex', gap: '15px', flexWrap: 'wrap'}}>
-                      {(trip.tienIch ? trip.tienIch.split(/[,·]/) : ["Wifi", "Nước uống", "Điều hòa"]).map((u, i) => (
+                      {(trip.tienIch ? trip.tienIch.split(/[,·]/) : []).map((u, i) => (
                         <span key={i} style={{fontSize: '12px', color: '#64748b', display: 'flex', alignItems: 'center', gap: '4px', fontWeight: 500}}>
                           <span style={{color: '#10b981'}}>✓</span> {u.trim()}
                         </span>
@@ -551,11 +648,11 @@ export default function SearchTrip() {
                         <span style={{fontSize: 13, color: "#64748b", fontWeight: 500}}>Ghế đã đặt</span>
                       </div>
                       <div style={{fontSize: 16, fontWeight: 800, color: "#334155", marginBottom: 8}}>
-                        {trip.bookedSeatCount ?? 0}/{trip.tongSoGhe || trip.soLuongGhe || 20} ghế
+                        {trip.bookedSeatCount ?? 0}/{trip.soLuongGhe || trip.tongSoGhe || 20} ghế
                       </div>
                       <div style={{width: "100%", height: 8, background: "#e2e8f0", borderRadius: 4, overflow: "hidden"}}>
                         <div style={{
-                          width: `${((trip.bookedSeatCount ?? 0) / (trip.tongSoGhe || trip.soLuongGhe || 20)) * 100}%`, 
+                          width: `${((trip.bookedSeatCount ?? 0) / (trip.soLuongGhe || trip.tongSoGhe || 20)) * 100}%`, 
                           height: "100%", 
                           background: "var(--primary-blue)", 
                           borderRadius: 4
@@ -569,7 +666,8 @@ export default function SearchTrip() {
                    </div>
                 </div>
               </div>
-            ))
+            );
+            })
           )}
         </div>
       </div>
@@ -577,23 +675,145 @@ export default function SearchTrip() {
       {/* --- MODAL CHI TIẾT --- */}
       {showDetailModal && selectedTrip && (
         <div className="modal-overlay" onClick={()=>setShowDetailModal(false)}>
-           <div className="modal-content" style={{width: 600}} onClick={e=>e.stopPropagation()}>
-              <div className="modal-header"><h3 className="modal-title">{getNhaXeName(selectedTrip.nhaXe)}</h3><span style={{cursor:"pointer", fontSize:24}} onClick={()=>setShowDetailModal(false)}>✕</span></div>
-              <div className="modal-body">
-                 <img src={selectedTrip.hinhAnh || "https://via.placeholder.com/600x300"} style={{width:"100%", height:250, objectFit:"cover", borderRadius:12, marginBottom:20}} alt=""/>
-                 <div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:20}}>
-                    <p><strong>Tuyến:</strong> {selectedTrip.tu} - {selectedTrip.den}</p>
-                    <p><strong>Ngày:</strong> {selectedTrip.ngayKhoiHanh} - {selectedTrip.gioKhoiHanh}</p>
-                    <p><strong>Loại xe:</strong> {selectedTrip.loaiXe}</p>
-                    <p><strong>Biển số:</strong> {selectedTrip.maTai || "Đang cập nhật"}</p>
+           <div className="modal-content" style={{width: 700}} onClick={e=>e.stopPropagation()}>
+              <div className="modal-header">
+                <h3 className="modal-title">{getNhaXeName(selectedTrip.nhaXe)}</h3>
+                <span style={{cursor:"pointer", fontSize:24, color:"#999"}} onClick={()=>setShowDetailModal(false)}>✕</span>
+              </div>
+              
+              <div className="modal-body" style={{padding:0, display:'flex', flexDirection:'column', height:'100%'}}>
+                 {/* Fixed Top Section */}
+                 <div style={{padding: "20px 30px 0"}}>
+                    <img src={selectedTrip.hinhAnh || "https://via.placeholder.com/600x300"} style={{width:"100%", height:200, objectFit:"cover", borderRadius:12}} alt=""/>
                  </div>
-                 <div style={{background:"#f1f5f9", padding:15, borderRadius:10}}>
-                    <strong>Tiện ích:</strong>
-                    <div style={{display:"flex", flexWrap:"wrap", gap:10, marginTop:10}}>
-                       {(selectedTrip.tienIch ? selectedTrip.tienIch.split("·") : ["Wifi", "Nước uống", "Điều hòa"]).map((u,i)=>(
-                          <span key={i} style={{background:"white", padding:"5px 10px", borderRadius:5, fontSize:13}}>{u}</span>
-                       ))}
-                    </div>
+
+                 {/* Tabs */}
+                 <div style={{display: 'flex', borderBottom: '1px solid #eee', padding: '0 30px', marginTop: 20}}>
+                    {['info', 'reviews', 'vouchers'].map(tab => (
+                      <div 
+                        key={tab}
+                        onClick={()=>setActiveTab(tab as any)} 
+                        style={{
+                          padding: '12px 20px', 
+                          cursor: 'pointer', 
+                          fontWeight: 700, 
+                          color: activeTab === tab ? 'var(--primary-blue)' : '#666',
+                          borderBottom: activeTab === tab ? '3px solid var(--primary-blue)' : '3px solid transparent',
+                          transition: 'all 0.2s'
+                        }}
+                      >
+                        {tab === 'info' ? 'Thông tin' : tab === 'reviews' ? `Đánh giá (${reviews.length})` : `Ưu đãi (${vouchers.length})`}
+                      </div>
+                    ))}
+                 </div>
+
+                 {/* Scrollable Content */}
+                 <div style={{flex: 1, overflowY: 'auto', padding: '25px 30px', background: '#fafafa'}}>
+                    
+                    {/* TAB: INFO */}
+                    {activeTab === 'info' && (
+                      <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
+                         {selectedTripMeta && (
+                           <div className="vehicle-type-badge" style={{ background: selectedTripMeta.bg, color: selectedTripMeta.color, borderColor: selectedTripMeta.border, marginBottom: 20 }}>
+                             <span className="vehicle-type-icon" style={{ background: selectedTripMeta.iconBg, color: selectedTripMeta.color }}>{selectedTripMeta.icon}</span>
+                             <div>
+                               <div className="vehicle-type-label">{selectedTripMeta.label}</div>
+                               <div className="vehicle-type-desc">{selectedTripMeta.subLabel}</div>
+                             </div>
+                           </div>
+                         )}
+                         <div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:15, marginBottom:25, background:"white", padding:20, borderRadius:12, border:"1px solid #eee"}}>
+                            <div><div style={{fontSize:12, color:"#888"}}>Tuyến đường</div><div style={{fontWeight:600}}>{selectedTrip.tu} ➝ {selectedTrip.den}</div></div>
+                            <div><div style={{fontSize:12, color:"#888"}}>Thời gian</div><div style={{fontWeight:600}}>{selectedTrip.gioKhoiHanh} • {selectedTrip.ngayKhoiHanh}</div></div>
+                            <div><div style={{fontSize:12, color:"#888"}}>Loại xe</div><div style={{fontWeight:600}}>{selectedTrip.loaiXe}</div></div>
+                            <div><div style={{fontSize:12, color:"#888"}}>Biển số</div><div style={{fontWeight:600}}>{selectedTrip.bienSo || "Đang cập nhật"}</div></div>
+                            <div><div style={{fontSize:12, color:"#888"}}>Mã tài</div><div style={{fontWeight:600}}>{selectedTrip.maTai || "Đang cập nhật"}</div></div>
+                         </div>
+                         <div style={{background:"white", padding:20, borderRadius:12, border:"1px solid #eee"}}>
+                            <strong style={{display:"block", marginBottom:10}}>Tiện ích trên xe:</strong>
+                            <div style={{display:"flex", flexWrap:"wrap", gap:10}}>
+                               {(selectedTrip.tienIch ? selectedTrip.tienIch.split(/[,·]/) : []).map((u,i)=>(
+                                  <span key={i} style={{background:"#f0f9ff", color:"#0284c7", padding:"6px 12px", borderRadius:6, fontSize:13, fontWeight:500}}>{u.trim()}</span>
+                               ))}
+                               {!selectedTrip.tienIch && <span style={{color: "#999", fontSize: 13}}>Wifi, Điều hòa, Nước, khăn lạnh</span>}
+                            </div>
+                         </div>
+                      </div>
+                    )}
+
+                    {/* TAB: REVIEWS */}
+                    {activeTab === 'reviews' && (
+                      <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
+                        {reviews.length === 0 ? (
+                          <div style={{textAlign:"center", padding:40, color:"#888"}}>
+                            <FaStar size={40} color="#ddd" style={{marginBottom:10}} />
+                            <p>Chưa có đánh giá nào cho chuyến xe này.</p>
+                          </div>
+                        ) : (
+                          <div style={{display:"flex", flexDirection:"column", gap:15}}>
+                            {reviews.map((r, idx) => (
+                              <div key={idx} style={{background:"white", padding:20, borderRadius:12, border:"1px solid #eee", boxShadow:"0 2px 5px rgba(0,0,0,0.02)"}}>
+                                <div style={{display:"flex", justifyContent:"space-between", marginBottom:10}}>
+                                  <div style={{fontWeight:700, color:"#333"}}>{r.hoTen || "Khách hàng ẩn danh"}</div>
+                                  <div style={{fontSize:12, color:"#888"}}>{r.createdAt ? new Date(r.createdAt).toLocaleDateString('vi-VN') : ""}</div>
+                                </div>
+                                <div style={{display:"flex", gap:2, marginBottom:10}}>
+                                  {Array.from({length:5}).map((_, i) => (
+                                    <FaStar key={i} size={14} color={i < r.rating ? "#FFC700" : "#eee"} />
+                                  ))}
+                                </div>
+                                <p style={{fontSize:14, color:"#555", lineHeight:1.5}}>{r.comment}</p>
+                                {r.reply && (
+                                  <div style={{marginTop:15, background:"#f8fafc", padding:15, borderRadius:8, borderLeft:"3px solid var(--primary-blue)"}}>
+                                    <div style={{fontSize:12, fontWeight:700, color:"var(--primary-blue)", marginBottom:5}}>Phản hồi từ nhà xe:</div>
+                                    <div style={{fontSize:13, color:"#475569"}}>{r.reply}</div>
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* TAB: VOUCHERS */}
+                    {activeTab === 'vouchers' && (
+                      <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
+                        {vouchers.length === 0 ? (
+                          <div style={{textAlign:"center", padding:40, color:"#888"}}>
+                            <FaTicketAlt size={40} color="#ddd" style={{marginBottom:10}} />
+                            <p>Hiện chưa có ưu đãi nào từ nhà xe này.</p>
+                          </div>
+                        ) : (
+                          <div style={{display:"grid", gap:15}}>
+                            {vouchers.map((v, idx) => (
+                              <div key={idx} style={{background:"white", padding:0, borderRadius:12, border:"1px solid #eee", overflow:"hidden", display:"flex", boxShadow:"0 2px 8px rgba(0,0,0,0.05)"}}>
+                                <div style={{width:100, background:"linear-gradient(135deg, #2474E5 0%, #1e3a8a 100%)", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", color:"white", padding:10, textAlign:"center"}}>
+                                  <div style={{fontWeight:800, fontSize:18}}>{v.discountType === 'percentage' ? `${v.discountValue}%` : `${(v.discountValue/1000)}k`}</div>
+                                  <div style={{fontSize:10, opacity:0.8}}>OFF</div>
+                                </div>
+                                <div style={{flex:1, padding:15, display:"flex", flexDirection:"column", justifyContent:"center"}}>
+                                  <div style={{fontWeight:700, color:"#333", marginBottom:5}}>{v.code}</div>
+                                  <div style={{fontSize:13, color:"#666", marginBottom:8}}>{v.description}</div>
+                                  <div style={{fontSize:11, color:"#999"}}>HSD: {new Date(v.endDate).toLocaleDateString('vi-VN')}</div>
+                                </div>
+                                <div style={{display:"flex", alignItems:"center", paddingRight:15}}>
+                                  <button 
+                                    onClick={() => {
+                                      navigator.clipboard.writeText(v.code);
+                                      alert(`Đã sao chép mã: ${v.code}`);
+                                    }}
+                                    style={{background:"#eff6ff", color:"var(--primary-blue)", border:"none", padding:"8px 12px", borderRadius:6, fontSize:12, fontWeight:700, cursor:"pointer"}}
+                                  >
+                                    Sao chép
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
                  </div>
               </div>
            </div>
@@ -606,6 +826,15 @@ export default function SearchTrip() {
            <div className="modal-content">
               <div className="modal-header"><h3 className="modal-title">Chọn ghế: {getNhaXeName(selectedTrip.nhaXe)}</h3><span style={{cursor:"pointer", fontSize:24}} onClick={()=>setShowSeatModal(false)}>✕</span></div>
               <div className="modal-body">
+                 {selectedTripMeta && (
+                   <div className="vehicle-type-badge" style={{ background: selectedTripMeta.bg, color: selectedTripMeta.color, borderColor: selectedTripMeta.border, justifyContent: "center", margin: "0 auto 20px" }}>
+                     <span className="vehicle-type-icon" style={{ background: selectedTripMeta.iconBg, color: selectedTripMeta.color }}>{selectedTripMeta.icon}</span>
+                     <div style={{ textAlign: "left" }}>
+                       <div className="vehicle-type-label">{selectedTripMeta.label}</div>
+                       <div className="vehicle-type-desc">{selectedTripMeta.subLabel}</div>
+                     </div>
+                   </div>
+                 )}
                  <div style={{textAlign:"center", marginBottom:20, display:"flex", justifyContent:"center", gap:20, fontSize:14, fontWeight:500}}>
                    <span style={{display:"flex", alignItems:"center", gap:5}}><div style={{width:15, height:15, border:"1px solid #ccc", borderRadius:4}}></div> Trống</span> 
                    <span style={{display:"flex", alignItems:"center", gap:5}}><div style={{width:15, height:15, background:"#e2e8f0", borderRadius:4}}></div> Đã đặt</span> 

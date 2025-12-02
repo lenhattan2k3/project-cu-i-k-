@@ -49,7 +49,9 @@ export default function MenuBar({ activeTab, setActiveTab }: MenuBarProps) {
 
       <style>{`
         .menu-container {
-          position: relative;
+          position: sticky;
+          top: 0;
+          z-index: 1000;
           height: 120px;
           background: linear-gradient(135deg, #1e40af, #2563eb, #60a5fa);
           box-shadow: 0 10px 25px rgba(0, 0, 0, 0.25);

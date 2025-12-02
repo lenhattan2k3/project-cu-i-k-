@@ -19,6 +19,152 @@ import {
 
 // Inline replacement for removed ../../api/withdrawalApi
 const API_BASE = import.meta.env.VITE_API_URL ?? "http://localhost:5000";
+const PARTNER_PAYMENTS_URL =
+  import.meta.env.VITE_PARTNER_PAYMENTS_URL ?? "http://localhost:5173/homepartner/payments";
+
+const SERVICE_FEE_OVERRIDE_KEY = "partnerServiceFeeOverrides";
+const PENDING_PAYOS_STORAGE_KEY = "partnerPayosPendingPayments";
+const PENDING_PAYOS_EXPIRY_MS = 1000 * 60 * 60 * 24 * 7; // 7 days
+
+type ServiceFeeOverrideStore = Record<string, { balance: number; updatedAt: number }>;
+type PendingPayosEntry = {
+  partnerId: string;
+  payosOrderCode: string; // numeric string from PayOS
+  withdrawalOrderCode?: string; // WD-... from withdrawal doc
+  withdrawalId?: string;
+  amount: number;
+  createdAt: number;
+};
+
+type PendingPayosStore = Record<string, PendingPayosEntry>;
+
+const readStore = <T,>(key: string, fallback: T): T => {
+  if (typeof window === "undefined" || !window.localStorage) return fallback;
+  try {
+    const raw = window.localStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as T) : fallback;
+  } catch (err) {
+    console.warn("Failed to parse store", key, err);
+    return fallback;
+  }
+};
+
+const writeStore = <T,>(key: string, value: T) => {
+  if (typeof window === "undefined" || !window.localStorage) return;
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value));
+  } catch (err) {
+    console.warn("Failed to persist store", key, err);
+  }
+};
+
+const getServiceFeeOverrideRecord = (partnerId: string) => {
+  if (!partnerId) return null;
+  const store = readStore<ServiceFeeOverrideStore>(SERVICE_FEE_OVERRIDE_KEY, {});
+  return store[partnerId] ?? null;
+};
+
+const persistServiceFeeOverrideRecord = (partnerId: string, balance: number) => {
+  if (!partnerId) return;
+  const store = readStore<ServiceFeeOverrideStore>(SERVICE_FEE_OVERRIDE_KEY, {});
+  store[partnerId] = {
+    balance: Math.max(0, Math.round(balance)),
+    updatedAt: Date.now(),
+  };
+  writeStore(SERVICE_FEE_OVERRIDE_KEY, store);
+};
+
+const clearServiceFeeOverrideRecord = (partnerId: string) => {
+  if (!partnerId) return;
+  const store = readStore<ServiceFeeOverrideStore>(SERVICE_FEE_OVERRIDE_KEY, {});
+  if (store[partnerId]) {
+    delete store[partnerId];
+    writeStore(SERVICE_FEE_OVERRIDE_KEY, store);
+  }
+};
+
+const resolveServiceFeeBalance = (partnerId: string, backendBalance: number) => {
+  const override = getServiceFeeOverrideRecord(partnerId);
+  if (!override) return backendBalance;
+  if (backendBalance <= override.balance) {
+    clearServiceFeeOverrideRecord(partnerId);
+    return backendBalance;
+  }
+  return override.balance;
+};
+
+const readPendingPayosStore = (): PendingPayosStore => {
+  const store = readStore<PendingPayosStore>(PENDING_PAYOS_STORAGE_KEY, {});
+  const now = Date.now();
+  let mutated = false;
+  Object.keys(store).forEach((code) => {
+    if (now - store[code].createdAt > PENDING_PAYOS_EXPIRY_MS) {
+      delete store[code];
+      mutated = true;
+    }
+  });
+  if (mutated) {
+    writeStore(PENDING_PAYOS_STORAGE_KEY, store);
+  }
+  return store;
+};
+
+const writePendingPayosStore = (store: PendingPayosStore) => {
+  writeStore(PENDING_PAYOS_STORAGE_KEY, store);
+};
+
+const rememberPendingPayosPayment = (entry: PendingPayosEntry) => {
+  if (!entry?.partnerId || !entry.payosOrderCode) return;
+  const store = readPendingPayosStore();
+  store[entry.payosOrderCode] = {
+    partnerId: entry.partnerId,
+    payosOrderCode: entry.payosOrderCode,
+    withdrawalOrderCode: entry.withdrawalOrderCode ?? undefined,
+    withdrawalId: entry.withdrawalId ?? undefined,
+    amount: entry.amount,
+    createdAt: Date.now(),
+  };
+  writePendingPayosStore(store);
+};
+
+const getPendingPayosPayment = (payosOrderCode: string) => {
+  if (!payosOrderCode) return null;
+  const store = readPendingPayosStore();
+  return store[payosOrderCode] ?? null;
+};
+
+const consumePendingPayosPayment = (payosOrderCode: string) => {
+  if (!payosOrderCode) return null;
+  const store = readPendingPayosStore();
+  const pending = store[payosOrderCode] ?? null;
+  if (pending) {
+    delete store[payosOrderCode];
+    writePendingPayosStore(store);
+  }
+  return pending;
+};
+
+const consumePendingPayosPaymentByWithdrawal = (opts: {
+  withdrawalOrderCode?: string | null;
+  withdrawalId?: string | null;
+}) => {
+  const { withdrawalOrderCode, withdrawalId } = opts ?? {};
+  if (!withdrawalOrderCode && !withdrawalId) return null;
+  const store = readPendingPayosStore();
+  const key = Object.keys(store).find((k) => {
+    const entry = store[k];
+    if (!entry) return false;
+    return (
+      (withdrawalOrderCode && entry.withdrawalOrderCode === withdrawalOrderCode) ||
+      (withdrawalId && entry.withdrawalId === withdrawalId)
+    );
+  });
+  if (!key) return null;
+  const entry = store[key];
+  delete store[key];
+  writePendingPayosStore(store);
+  return entry;
+};
 
 async function getWithdrawalHistory(partnerId: string) {
   try {
@@ -124,6 +270,11 @@ type StatsType = {
   amountAfterFee: number;
 };
 
+const PAID_STATUSES = new Set(["paid", "completed", "done"]);
+
+const isPaidStatus = (status?: string | null) =>
+  typeof status === "string" && PAID_STATUSES.has(status.toLowerCase());
+
 type WithdrawalType = {
   _id: string;
   amount: number;
@@ -141,11 +292,12 @@ const BookingDetail = ({ booking, feePercent }: { booking: BookingType; feePerce
   const formatMoney = (n: number) =>
     new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND" }).format(n);
 
-  const price = booking.finalTotal ?? booking.totalPrice ?? 0;
+  const rawPrice = booking.totalPrice ?? 0;
+  const price = booking.finalTotal ?? rawPrice;
   const appliedFee = booking.feePercent ?? feePercent ?? 0;
   const serviceFeeAmount = booking.serviceFeeAmount ?? Math.round((price * appliedFee) / 100);
-  const discount = booking.discountAmount ?? 0;
-  const received = price - serviceFeeAmount - discount;
+  const discount = booking.discountAmount ?? Math.max(0, rawPrice - price);
+  const received = price - serviceFeeAmount;
 
   return (
     <div
@@ -211,7 +363,15 @@ const BookingDetail = ({ booking, feePercent }: { booking: BookingType; feePerce
 
 // =============== MAIN COMPONENT =====================
 export default function PartnerPayment() {
-  const [activeTab, setActiveTab] = useState<"overview" | "transactions" | "withdraw">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "transactions" | "withdraw">(() => {
+    const saved = localStorage.getItem("partnerActiveTab");
+    return (saved === "overview" || saved === "transactions" || saved === "withdraw") ? saved : "overview";
+  });
+
+  const changeTab = (tab: "overview" | "transactions" | "withdraw") => {
+    setActiveTab(tab);
+    localStorage.setItem("partnerActiveTab", tab);
+  };
 
   const [stats, setStats] = useState<StatsType>({
     totalRevenue: 0,
@@ -228,10 +388,8 @@ export default function PartnerPayment() {
   const [feePercent, setFeePercent] = useState<number>(0);
 
   // ✅ Withdrawal states
-  const [withdrawableAmount, setWithdrawableAmount] = useState<number>(0);
   const [withdrawAmount, setWithdrawAmount] = useState<string>("");
   const [withdrawalHistory, setWithdrawalHistory] = useState<WithdrawalType[]>([]);
-  const [paymentMethod, setPaymentMethod] = useState<string>("payos");
   const [withdrawLoading, setWithdrawLoading] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [payosSuccessInfo, setPayosSuccessInfo] = useState<{
@@ -246,17 +404,36 @@ export default function PartnerPayment() {
   const [payosQrUrl, setPayosQrUrl] = useState("");
   const [payosQrLoadError, setPayosQrLoadError] = useState(false);
   const [payosOrderCode, setPayosOrderCode] = useState("");
+  const [withdrawalOrderCodeState, setWithdrawalOrderCodeState] = useState("");
+  const [activeWithdrawalId, setActiveWithdrawalId] = useState<string | null>(null);
   const [payosAmount, setPayosAmount] = useState<number | null>(null);
   const [ledgerSnapshot, setLedgerSnapshot] = useState<PartnerLedger | null>(null);
   const [preferLedgerBalances, setPreferLedgerBalances] = useState(false);
 
   // ✅ Add state cho bank info
-  const [showBankForm, setShowBankForm] = useState(false);
-  const [bankName, setBankName] = useState("");
-  const [accountNumber, setAccountNumber] = useState("");
-  const [accountHolder, setAccountHolder] = useState("");
+  // (Removed bank states as requested)
 
   const [partnerId, setPartnerId] = useState<string>(auth.currentUser?.uid ?? "");
+
+  const persistServiceFeeBalanceLocally = (nextBalance: number) => {
+    if (!partnerId || Number.isNaN(nextBalance)) return;
+    const normalized = Math.max(0, Math.round(nextBalance));
+    persistServiceFeeOverrideRecord(partnerId, normalized);
+    setStats((prev) => ({
+      ...prev,
+      serviceFee: normalized,
+    }));
+    setLedgerSnapshot((prev) =>
+      prev ? { ...prev, serviceFeeBalance: normalized } : prev
+    );
+  };
+
+  const applyLocalServiceFeeDeduction = (amount: number) => {
+    if (!partnerId || !Number.isFinite(amount) || amount <= 0) return;
+    const currentBalance = ledgerSnapshot?.serviceFeeBalance ?? stats.serviceFee ?? 0;
+    const nextBalance = Math.max(0, currentBalance - amount);
+    persistServiceFeeBalanceLocally(nextBalance);
+  };
 
   // Keep partnerId in sync with Firebase auth state so all effects re-run when user changes
   useEffect(() => {
@@ -278,12 +455,13 @@ export default function PartnerPayment() {
     if (!snapshot) return;
     const totalRevenue = Number(snapshot.totalRevenue || 0);
     const totalServiceFee = Number(snapshot.totalServiceFee || 0);
-    const serviceFeeBalance = snapshot.serviceFeeBalance != null
+    const rawServiceFeeBalance = snapshot.serviceFeeBalance != null
       ? Number(snapshot.serviceFeeBalance)
       : totalServiceFee;
+    const serviceFeeBalance = resolveServiceFeeBalance(partnerId, rawServiceFeeBalance);
     const receivableBalance = Math.max(0, Number(snapshot.receivableBalance || 0));
 
-    setLedgerSnapshot(snapshot);
+    setLedgerSnapshot({ ...snapshot, serviceFeeBalance });
     setStats((prev) => ({
       ...prev,
       totalRevenue,
@@ -291,7 +469,6 @@ export default function PartnerPayment() {
       serviceFee: serviceFeeBalance,
       amountAfterFee: receivableBalance,
     }));
-    setWithdrawableAmount(receivableBalance);
   };
 
   const loadLedger = async (id: string) => {
@@ -368,6 +545,7 @@ export default function PartnerPayment() {
         return;
       }
 
+      setError(null);
       try {
         setLoading(true);
 
@@ -383,28 +561,26 @@ export default function PartnerPayment() {
         let withdrawnAmount = 0;
         let refundAmount = 0;
         let totalServiceFee = 0;
-        let totalDiscounts = 0;
 
         bookingsData.forEach((b) => {
-          const price = b.finalTotal || b.totalPrice || 0;
+          const grossPrice = b.totalPrice ?? 0;
+          const netPrice = b.finalTotal ?? grossPrice;
           const appliedFeePercent = b.feePercent !== undefined ? b.feePercent : feePercent;
-          const serviceFee = b.serviceFeeAmount ?? Math.round((price * appliedFeePercent) / 100);
-          const discount = b.discountAmount ?? 0;
+          const serviceFee = b.serviceFeeAmount ?? Math.round((netPrice * appliedFeePercent) / 100);
 
-          totalRevenue += price;
+          totalRevenue += netPrice;
 
           if (b.status === "pending") {
-            pendingAmount += price;
-          } else if (b.status === "paid") {
-            withdrawnAmount += price;
+            pendingAmount += netPrice;
+          } else if (isPaidStatus(b.status)) {
+            withdrawnAmount += netPrice;
             totalServiceFee += serviceFee;
-            totalDiscounts += discount;
           } else if (b.status === "refunded") {
-            refundAmount += price;
+            refundAmount += netPrice;
           }
         });
 
-        const amountAfterFee = withdrawnAmount - totalServiceFee - totalDiscounts;
+        const amountAfterFee = Math.max(0, withdrawnAmount - totalServiceFee);
 
         setStats((prev) => ({
           ...prev,
@@ -416,9 +592,8 @@ export default function PartnerPayment() {
           amountAfterFee: preferLedgerBalances ? prev.amountAfterFee : amountAfterFee,
         }));
 
-        // Keep withdrawable amount in sync with computed stats only when backend snapshot unavailable
+        // Keep ledger snapshot fresh when backend snapshot unavailable
         if (!preferLedgerBalances) {
-          setWithdrawableAmount(amountAfterFee);
           await rebuildLedgerSnapshot(partnerId);
         }
       } catch (err: unknown) {
@@ -457,6 +632,15 @@ export default function PartnerPayment() {
       const amount = Number(data?.amount ?? withdrawal?.amount ?? 0);
 
       if (withdrawal?.paymentMethod === "payos") {
+        if (withdrawal?._id || withdrawal?.orderCode) {
+          consumePendingPayosPaymentByWithdrawal({
+            withdrawalOrderCode: withdrawal.orderCode,
+            withdrawalId: withdrawal._id,
+          });
+        }
+        if (amount > 0) {
+          applyLocalServiceFeeDeduction(amount);
+        }
         setPayosSuccessInfo({
           amount,
           orderCode: withdrawal.orderCode,
@@ -496,13 +680,89 @@ export default function PartnerPayment() {
       socket.off("feeUpdated", onFeeUpdated);
       socket.off("withdrawalSuccess", onWithdrawalSuccess);
     };
-  }, []);
+  }, [partnerId]); // Added partnerId dependency to ensure loadLedger works correctly
+
+  // Check URL params for PayOS return
+  useEffect(() => {
+    if (!partnerId) return;
+    const params = new URLSearchParams(window.location.search);
+    const status = params.get("status");
+    const orderCode = params.get("orderCode");
+
+    if (!status && !orderCode) return;
+
+    changeTab("withdraw");
+
+    try {
+      const target = new URL(PARTNER_PAYMENTS_URL);
+      if (window.location.origin === target.origin) {
+        window.history.replaceState({}, "", `${target.pathname}${target.search}`);
+      } else {
+        window.history.replaceState({}, "", window.location.pathname);
+      }
+    } catch {
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+
+    if (status === "CANCELLED" && orderCode) {
+      consumePendingPayosPayment(orderCode);
+      setPayosOrderCode("");
+      setWithdrawalOrderCodeState("");
+      setActiveWithdrawalId(null);
+      setPayosAmount(null);
+      setShowPayosQr(false);
+      setPayosCheckoutUrl("");
+      setPayosQrUrl("");
+      return;
+    }
+
+    const shouldVerifySuccess = Boolean(orderCode && (status === "PAID" || !status));
+    if (shouldVerifySuccess && orderCode) {
+      const pendingBefore = getPendingPayosPayment(orderCode);
+      const verifyPayment = async () => {
+        try {
+          const res = await fetch(`${API_BASE}/api/payos/confirm-return`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ orderCode, status: "PAID" }),
+          });
+          const payload = await res.json().catch(() => ({}));
+          if (payload?.success) {
+            const consumed = consumePendingPayosPayment(orderCode) ?? pendingBefore;
+            if (
+              consumed &&
+              consumed.partnerId === partnerId &&
+              Number.isFinite(consumed.amount) &&
+              consumed.amount > 0
+            ) {
+              applyLocalServiceFeeDeduction(consumed.amount);
+            }
+            setPayosOrderCode("");
+            setWithdrawalOrderCodeState("");
+            setActiveWithdrawalId(null);
+            setPayosAmount(null);
+            setShowPayosQr(false);
+            setPayosCheckoutUrl("");
+            setPayosQrUrl("");
+          }
+        } catch (e) {
+          console.error("Verification failed", e);
+        } finally {
+          if (partnerId) {
+            loadLedger(partnerId);
+            loadWithdrawalHistory();
+          }
+        }
+      };
+      verifyPayment();
+    }
+  }, [partnerId]);
 
   const loadWithdrawalHistory = async () => fetchWithdrawalHistory(partnerId);
 
   // Delete a withdrawal (backend if available, otherwise remove local/synthetic entry)
   const handleDeleteWithdrawal = async (id: string) => {
-    if (!confirm("Bạn chắc chắn muốn xóa lịch sử rút tiền này?")) return;
+    if (!confirm("Bạn chắc chắn muốn xóa lịch sử thanh toán này?")) return;
 
     try {
       setDeletingId(id);
@@ -545,7 +805,7 @@ export default function PartnerPayment() {
       }
     } catch (err) {
       console.error("Lỗi xóa withdrawal:", err);
-      alert("Lỗi khi xóa lịch sử rút tiền.");
+      alert("Lỗi khi xóa lịch sử thanh toán.");
     } finally {
       setDeletingId(null);
     }
@@ -556,8 +816,8 @@ export default function PartnerPayment() {
   // Manual refresh feature removed per request
 
   // ✅ Handle withdraw
-  const handleWithdraw = async (overrideMethod?: string) => {
-    const method = overrideMethod || paymentMethod;
+  const handleWithdraw = async () => {
+    const method = "payos"; // Force PayOS
     const amount = parseFloat(withdrawAmount);
 
     if (amount <= 0) {
@@ -565,139 +825,177 @@ export default function PartnerPayment() {
       return;
     }
 
-    const methodLimit = method === "payos" ? stats.serviceFee : withdrawableAmount;
+    const methodLimit = stats.serviceFee;
     if (amount > methodLimit) {
-      const limitLabel = method === "payos" ? "phí dịch vụ còn lại" : "số tiền có thể rút";
-      alert(`❌ Số tiền vượt quá ${limitLabel}! Giới hạn: ${formatCurrency(methodLimit)}`);
+      alert(`❌ Số tiền vượt quá phí dịch vụ còn lại! Giới hạn: ${formatCurrency(methodLimit)}`);
       return;
     }
 
     try {
       setWithdrawLoading(true);
 
-      // decide which bucket to deduct from: payos => fee, bank_transfer => received
-      const deductFrom = method === "payos" ? "fee" : "received";
+      // decide which bucket to deduct from: payos => fee
+      const deductFrom = "fee";
 
-      // For PayOS we create a pending withdrawal and wait for payment provider
-      // (webhook) to confirm → backend will mark status: 'success'. For bank
-      // transfers we persist immediately as success.
-      if (method === "payos") {
-        // generate an orderCode so both FE and payment provider can reference it
-        const orderCode = `WD-${partnerId}-${Date.now()}`;
-        const details = { orderCode, bankName: null, accountNumber: null, accountHolder: null };
+      // generate an orderCode so both FE and payment provider can reference it
+      const orderCode = `WD-${partnerId}-${Date.now()}`;
+      const details = { orderCode, bankName: null, accountNumber: null, accountHolder: null };
 
-        const withdrawRes = await createWithdrawalRequest(
-          partnerId,
-          amount,
-          method,
-          details,
-          // pending: will be confirmed by webhook
-          { status: "pending", deductFrom }
-        );
+      const withdrawRes = await createWithdrawalRequest(
+        partnerId,
+        amount,
+        method,
+        details,
+        // pending: will be confirmed by webhook
+        { status: "pending", deductFrom }
+      );
 
-        if (!withdrawRes.success) {
-          alert("❌ Tạo yêu cầu thất bại!");
-          return;
-        }
-
-        // attach orderCode returned from backend if present
-        const order = withdrawRes.withdrawal?.orderCode ?? orderCode;
-
-        // create PayOS payment link for this withdrawal
-        const payosRes = await createPaymentLink(
-          partnerId,
-          withdrawRes.withdrawal?._id ?? order,
-          amount,
-          `Rút tiền từ Vexe - ${amount}đ`,
-          Number(Date.now())
-        );
-
-        const checkout =
-          payosRes?.paymentLink ||
-          payosRes?.checkoutUrl ||
-          payosRes?.url ||
-          payosRes?.data?.checkoutUrl ||
-          payosRes?.payment?.payosData?.checkoutUrl ||
-          payosRes?.payment?.payosData?.data?.checkoutUrl ||
-          payosRes?.payment?.payosData?.paymentLink ||
-          "";
-
-        setPayosCheckoutUrl(checkout || JSON.stringify(payosRes, null, 2));
-        setPayosOrderCode(order);
-        setPayosAmount(amount);
-
-        const payload = encodeURIComponent(checkout || payosCheckoutUrl || JSON.stringify(payosRes));
-        const qr = `https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${payload}`;
-        setPayosQrUrl(qr);
-        setShowPayosQr(true);
-
-        // show user that payment is pending; when provider calls our webhook
-        // (hoặc bạn tự xác nhận), frontend vẫn nghe socket để đồng bộ. Đồng thời
-        // hiển thị ngay trong lịch sử là đã trừ phí dịch vụ.
-        alert('✅ Đã tạo yêu cầu PayOS. Vui lòng hoàn tất thanh toán PayOS để hệ thống trừ phí.');
-
-        // Track pending entry locally so user can follow status while waiting for webhook
-        const localId = withdrawRes.withdrawal?._id ?? `local-${Date.now()}`;
-        const localWithdrawal: WithdrawalType = {
-          _id: String(localId),
-          amount,
-          paymentMethod: method,
-          createdAt: new Date().toISOString(),
-          status: "pending",
-        };
-        setWithdrawalHistory((prev) => [localWithdrawal, ...prev]);
-        addLocalWithdrawal(localWithdrawal);
-
-        setWithdrawAmount("");
-        return;
-      } else {
-        // bank transfer: persist immediately as success
-        const withdrawRes = await createWithdrawalRequest(
-          partnerId,
-          amount,
-          method,
-          method === "bank_transfer" ? { bankName, accountNumber, accountHolder } : null,
-          { status: "success", deductFrom }
-        );
-
-        if (!withdrawRes.success) {
-          alert("❌ Tạo yêu cầu thất bại!");
-          return;
-        }
-
-        // proceed to optimistic UI update below (real record stored in DB)
-        var _realWithdrawRes = withdrawRes;
-        // create a local withdrawal entry for immediate UI feedback
-        const localId = _realWithdrawRes.withdrawal?._id ?? `local-${Date.now()}`;
-        const localWithdrawal: WithdrawalType = {
-          _id: String(localId),
-          amount,
-          paymentMethod: method,
-          createdAt: new Date().toISOString(),
-          status: _realWithdrawRes.withdrawal?.status ?? "success",
-        };
-
-        setWithdrawalHistory((prev) => [localWithdrawal, ...prev]);
-        addLocalWithdrawal(localWithdrawal);
-
-        setWithdrawAmount("");
-        setBankName("");
-        setAccountNumber("");
-        setAccountHolder("");
-        setShowBankForm(false);
-        alert("✅ Yêu cầu rút tiền đã được tạo và lưu. Đã trừ vào hạn mức.");
-        await loadLedger(partnerId);
-        await loadWithdrawalHistory();
+      if (!withdrawRes.success) {
+        alert("❌ Tạo yêu cầu thất bại!");
         return;
       }
 
-      // Note: earlier branches already handled PayOS (pending) and bank transfer (success)
-      // and returned. No further shared post-processing is required here.
+      // attach orderCode returned from backend if present
+      const withdrawalOrder = withdrawRes.withdrawal?.orderCode ?? orderCode;
+      const withdrawalId = withdrawRes.withdrawal?._id ? String(withdrawRes.withdrawal._id) : null;
+
+      // create PayOS payment link for this withdrawal
+      // Ensure amount is integer
+      const intAmount = Math.round(amount);
+      const payosOrderCodeNumber = Date.now();
+      const payosOrderCodeStr = String(payosOrderCodeNumber);
+      const encodedPayosOrder = encodeURIComponent(payosOrderCodeStr);
+      const returnUrl = `${PARTNER_PAYMENTS_URL}?status=PAID&orderCode=${encodedPayosOrder}`;
+      const cancelUrl = `${PARTNER_PAYMENTS_URL}?status=CANCELLED&orderCode=${encodedPayosOrder}`;
+
+      const payosRes = await createPaymentLink(
+        partnerId,
+        withdrawalId ?? withdrawalOrder,
+        intAmount,
+        `Thanh toan phi dich vu`, // Remove special chars to be safe
+        payosOrderCodeNumber,
+        returnUrl,
+        cancelUrl
+      );
+
+      const checkout =
+        payosRes?.paymentLink ||
+        payosRes?.checkoutUrl ||
+        payosRes?.url ||
+        payosRes?.data?.checkoutUrl ||
+        payosRes?.payment?.payosData?.checkoutUrl ||
+        payosRes?.payment?.payosData?.data?.checkoutUrl ||
+        payosRes?.payment?.payosData?.paymentLink ||
+        "";
+
+      setPayosCheckoutUrl(checkout || JSON.stringify(payosRes, null, 2));
+      setPayosOrderCode(payosOrderCodeStr);
+      setWithdrawalOrderCodeState(withdrawalOrder);
+      setActiveWithdrawalId(withdrawalId);
+      setPayosAmount(amount);
+      rememberPendingPayosPayment({
+        partnerId,
+        payosOrderCode: payosOrderCodeStr,
+        withdrawalOrderCode: withdrawalOrder,
+        withdrawalId: withdrawalId ?? undefined,
+        amount,
+        createdAt: Date.now(),
+      });
+
+      const payload = encodeURIComponent(checkout || payosCheckoutUrl || JSON.stringify(payosRes));
+      const qr = `https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${payload}`;
+      setPayosQrUrl(qr);
+      setShowPayosQr(true);
+
+      alert('✅ Đã tạo yêu cầu PayOS. Vui lòng hoàn tất thanh toán PayOS để hệ thống trừ phí.');
+
+      // Track pending entry locally so user can follow status while waiting for webhook
+      const localId = withdrawRes.withdrawal?._id ?? `local-${Date.now()}`;
+      const localWithdrawal: WithdrawalType = {
+        _id: String(localId),
+        amount,
+        paymentMethod: method,
+        createdAt: new Date().toISOString(),
+        status: "pending",
+      };
+      setWithdrawalHistory((prev) => [localWithdrawal, ...prev]);
+      addLocalWithdrawal(localWithdrawal);
+
+      setWithdrawAmount("");
+      return;
+
     } catch (err) {
       console.error("❌ Error:", err);
-      alert("❌ Lỗi rút tiền!");
+      alert("❌ Lỗi thanh toán!");
     } finally {
       setWithdrawLoading(false);
+    }
+  };
+
+  const handleConfirmPayment = async () => {
+    if (!payosOrderCode && !withdrawalOrderCodeState && !activeWithdrawalId) return;
+    try {
+      // Attempt to confirm PayOS payment so backend updates booking/payment records
+      if (payosOrderCode) {
+        try {
+          await fetch(`${API_BASE}/api/payos/confirm-return`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ orderCode: payosOrderCode, status: "PAID" }),
+          });
+        } catch (confirmErr) {
+          console.warn("PayOS confirm-return failed", confirmErr);
+        }
+      }
+
+      // Ensure withdrawal document is marked success
+      if (withdrawalOrderCodeState || activeWithdrawalId) {
+        const payload = withdrawalOrderCodeState
+          ? { orderCode: withdrawalOrderCodeState }
+          : { id: activeWithdrawalId };
+        const res = await fetch(`${API_BASE}/api/withdrawals/confirm`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const d = await res.json();
+        if (!d.success) {
+          alert("❌ Lỗi: " + (d.error || "Không thể xác nhận"));
+          return;
+        }
+      }
+
+      const consumedByPayos = payosOrderCode
+        ? consumePendingPayosPayment(payosOrderCode)
+        : null;
+      const consumedByWithdrawal =
+        (!consumedByPayos && (withdrawalOrderCodeState || activeWithdrawalId))
+          ? consumePendingPayosPaymentByWithdrawal({
+              withdrawalOrderCode: withdrawalOrderCodeState,
+              withdrawalId: activeWithdrawalId,
+            })
+          : null;
+      const deductionAmount =
+        payosAmount ?? consumedByPayos?.amount ?? consumedByWithdrawal?.amount ?? 0;
+      if (deductionAmount > 0) {
+        applyLocalServiceFeeDeduction(deductionAmount);
+      }
+
+      alert("✅ Đã xác nhận thanh toán thành công!");
+      setShowPayosQr(false);
+      setPayosCheckoutUrl("");
+      setPayosQrUrl("");
+      setActiveTab("withdraw");
+      setPayosOrderCode("");
+      setWithdrawalOrderCodeState("");
+      setActiveWithdrawalId(null);
+      setPayosAmount(null);
+
+      await loadLedger(partnerId);
+      await loadWithdrawalHistory();
+    } catch (err) {
+      console.error(err);
+      alert("❌ Lỗi kết nối server");
     }
   };
 
@@ -771,7 +1069,7 @@ export default function PartnerPayment() {
   if (loading) return <div style={styles.page}>⏳ Đang tải dữ liệu...</div>;
   if (error) return <div style={styles.page}>❌ {error}</div>;
 
-  const paidBookings = bookings.filter((b) => b.status === "paid");
+  const paidBookings = bookings.filter((b) => isPaidStatus(b.status));
 
   const chartData = [
     { name: "Đã thanh toán", value: stats.withdrawnAmount },
@@ -855,7 +1153,7 @@ export default function PartnerPayment() {
             key={tab}
             style={styles.tabBtn(activeTab === tab) as any}
             onClick={() =>
-              setActiveTab(
+              changeTab(
                 tab as "overview" | "transactions" | "withdraw"
               )
             }
@@ -864,7 +1162,7 @@ export default function PartnerPayment() {
               ? "📊 Tổng quan"
               : tab === "transactions"
               ? "📄 Giao dịch"
-              : "💰 BANK"}
+              : "💰 Thanh toán phí"}
           </button>
         ))}
       </div>
@@ -961,7 +1259,7 @@ export default function PartnerPayment() {
       {/* WITHDRAW */}
       {activeTab === "withdraw" && (
         <div style={styles.overview}>
-          <h3>💰 Thanh Toán</h3>
+          <h3>💰 Thanh toán phí dịch vụ</h3>
 
           <div style={{
             background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
@@ -990,70 +1288,67 @@ export default function PartnerPayment() {
             marginBottom: "30px",
             border: "1px solid #e5e7eb",
           }}>
-            <h4 style={{ marginTop: 0 }}>📋 Thông tin Thanh toán</h4>
-
-            <div style={{ marginBottom: "12px", display: "flex", gap: "12px", alignItems: "center" }}>
-              <label style={{ minWidth: 120, color: "#374151", fontWeight: 600 }}>Phương thức</label>
-              <select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)} style={{ padding: "8px", borderRadius: 8, border: "1px solid #d1d5db" }}>
-                <option value="payos">PayOS</option>
-                <option value="bank_transfer">Chuyển khoản ngân hàng</option>
-              </select>
-              {paymentMethod === "bank_transfer" && (
-                <button onClick={() => setShowBankForm((s) => !s)} style={{ marginLeft: "auto", padding: "8px 12px", borderRadius: 8, border: "none", background: "#2563eb", color: "#fff" }}>
-                  {showBankForm ? "Ẩn thông tin ngân hàng" : "Nhập thông tin ngân hàng"}
-                </button>
-              )}
-            </div>
+            <h4 style={{ marginTop: 0 }}>📋 Thanh toán phí dịch vụ</h4>
 
             <div style={{ marginBottom: "15px" }}>
+              <label style={{ display: "block", marginBottom: "8px", color: "#374151", fontWeight: 600 }}>Nhập số tiền thanh toán</label>
               <input
                 type="number"
                 placeholder="Nhập số tiền"
                 value={withdrawAmount}
                 onChange={(e) => setWithdrawAmount(e.target.value)}
-                max={withdrawableAmount}
                 style={styles.input}
               />
+              <button
+                type="button"
+                onClick={() => setWithdrawAmount(String(stats.serviceFee || 0))}
+                disabled={!stats.serviceFee}
+                style={{
+                  marginTop: 8,
+                  padding: "8px 12px",
+                  borderRadius: 8,
+                  border: "none",
+                  background: stats.serviceFee ? "#0ea5e9" : "#cbd5f5",
+                  color: stats.serviceFee ? "#fff" : "#6b7280",
+                  cursor: stats.serviceFee ? "pointer" : "not-allowed",
+                  fontWeight: 600,
+                }}
+              >
+                Thanh toán toàn bộ phí còn lại
+              </button>
+              <button
+                type="button"
+                onClick={() => setWithdrawAmount("0")}
+                style={{
+                  marginTop: 8,
+                  marginLeft: 8,
+                  padding: "8px 12px",
+                  borderRadius: 8,
+                  border: "1px solid #d1d5db",
+                  background: "#fff",
+                  color: "#374151",
+                  cursor: "pointer",
+                  fontWeight: 600,
+                }}
+              >
+                Đặt lại 0
+              </button>
             </div>
 
-            {/* Hiển thị phí và số tiền nhận được */}
+            {/* Hiển thị phí */}
             {(() => {
-              // IMPORTANT: Always display the aggregated totals from `stats` so the
-              // shown "Phí dịch vụ" and "Nhận được" do NOT change while the user
-              // types an amount. They will update only when the underlying booking
-              // data or withdrawal history changes (e.g., after a successful
-              // payment/withdrawal and a refresh).
               const fee = stats.serviceFee || 0;
-              const receive = stats.amountAfterFee || 0;
-
               return (
                 <div style={{ display: "flex", gap: 12, marginBottom: 12, alignItems: "center" }}>
                   <div style={{ flex: 1, background: "#fff", padding: 12, borderRadius: 8, border: "1px solid #e5e7eb" }}>
-                    <div style={{ color: "#6b7280", fontSize: 13 }}>Phí dịch vụ ({feePercent}%)</div>
+                    <div style={{ color: "#6b7280", fontSize: 13 }}>Phí dịch vụ cần thanh toán</div>
                     <div style={{ fontWeight: 700, marginTop: 6, color: "#b91c1c" }}>
                       {formatCurrency(fee)}
                     </div>
-                    <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 6 }}>Hiển thị theo hạn mức có thể rút (không đổi khi nhập số tiền)</div>
-                  </div>
-
-                  <div style={{ flex: 1, background: "#fff", padding: 12, borderRadius: 8, border: "1px solid #e5e7eb" }}>
-                    <div style={{ color: "#6b7280", fontSize: 13 }}>Nhận được (sau phí)</div>
-                    <div style={{ fontWeight: 700, marginTop: 6, color: "#15803d" }}>
-                      {formatCurrency(receive)}
-                    </div>
-                    <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 6 }}>Hiển thị theo hạn mức có thể rút (không đổi khi nhập số tiền)</div>
                   </div>
                 </div>
               );
             })()}
-
-            {showBankForm && paymentMethod === "bank_transfer" && (
-              <div style={{ marginBottom: "12px", display: "grid", gap: 8 }}>
-                <input value={bankName} onChange={(e) => setBankName(e.target.value)} placeholder="Ngân hàng" style={styles.input} />
-                <input value={accountNumber} onChange={(e) => setAccountNumber(e.target.value)} placeholder="Số tài khoản" style={styles.input} />
-                <input value={accountHolder} onChange={(e) => setAccountHolder(e.target.value)} placeholder="Chủ tài khoản" style={styles.input} />
-              </div>
-            )}
 
             <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
               <button
@@ -1074,31 +1369,13 @@ export default function PartnerPayment() {
                   transition: "all 0.3s",
                 }}
               >
-                {!withdrawLoading ? "Thanh Toán" : "Đang gửi..."}
-              </button>
-
-              <button
-                onClick={() => handleWithdraw('bank_transfer')}
-                disabled={withdrawLoading || !withdrawAmount || parseFloat(withdrawAmount) <= 0}
-                style={{
-                  flex: 1,
-                  padding: "12px",
-                  background: withdrawLoading || !withdrawAmount || parseFloat(withdrawAmount) <= 0 ? "#eee" : "#10b981",
-                  color: withdrawLoading || !withdrawAmount || parseFloat(withdrawAmount) <= 0 ? "#999" : "#fff",
-                  border: "none",
-                  borderRadius: "10px",
-                  cursor: withdrawLoading || !withdrawAmount || parseFloat(withdrawAmount) <= 0 ? "not-allowed" : "pointer",
-                  fontWeight: "600",
-                  fontSize: "15px",
-                }}
-              >
-                Rút tiền
+                {!withdrawLoading ? "Thanh Toán Phí dịch vụ" : "Đang xử lý..."}
               </button>
             </div>
           </div>
 
           {/* Withdrawal History */}
-          <h3>📋 Lịch sử rút tiền</h3>
+          <h3>📋 Lịch sử thanh toán phí</h3>
           {payosSuccessInfo && (
             <div style={{
               background: "#ecfdf5",
@@ -1141,7 +1418,7 @@ export default function PartnerPayment() {
           )}
           {withdrawalHistory.length === 0 ? (
             <p style={{ color: "#999", fontStyle: "italic", textAlign: "center", padding: "20px" }}>
-              Chưa có lịch sử rút tiền
+              Chưa có lịch sử thanh toán
             </p>
           ) : (
             <table style={{
@@ -1188,7 +1465,7 @@ export default function PartnerPayment() {
                             "#721c24",
                         }}>
                           {w.status === "success" && "✅ Thành công"}
-                          {w.status === "pending" && "⏳ Chờ duyệt"}
+                          {w.status === "pending" && (w.paymentMethod === "payos" ? "⏳ Chờ thanh toán" : "⏳ Chờ duyệt")}
                           {w.status === "processing" && "🔄 Đang xử lý"}
                           {w.status === "failed" && "❌ Thất bại"}
                         </span>
@@ -1226,7 +1503,7 @@ export default function PartnerPayment() {
           <div style={{ width: 520, maxWidth: "95%", background: "#fff", borderRadius: 12, padding: 20 }}>
             <h3 style={{ marginTop: 0 }}>🔗 Thanh toán qua PayOS</h3>
             <p style={{ margin: "6px 0 12px", color: "#374151" }}>
-              Quét QR để thanh toán cho đơn rút tiền <b>{payosOrderCode}</b> — <b>{payosAmount ? formatCurrency(payosAmount) : ""}</b>
+              Quét QR để thanh toán cho đơn rút tiền <b>{withdrawalOrderCodeState || payosOrderCode}</b> — <b>{payosAmount ? formatCurrency(payosAmount) : ""}</b>
             </p>
             <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
               <div style={{ flex: "0 0 200px", textAlign: "center", background: "#f8fafc", padding: 12, borderRadius: 8 }}>
@@ -1252,13 +1529,16 @@ export default function PartnerPayment() {
                 </div>
 
                 <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-                  <button onClick={() => { navigator.clipboard?.writeText(payosCheckoutUrl); alert("Đã sao chép link"); }} style={{ padding: "8px 12px", background: "#2563eb", color: "#fff", border: "none", borderRadius: 8 }}>
+                  <button onClick={() => { navigator.clipboard?.writeText(payosCheckoutUrl); alert("Đã sao chép link"); }} style={{ padding: "8px 12px", background: "#2563eb", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer" }}>
                     Sao chép link
                   </button>
-                  <button onClick={() => window.open(payosCheckoutUrl, "_blank")} style={{ padding: "8px 12px", background: "#10b981", color: "#fff", border: "none", borderRadius: 8 }}>
+                  <button onClick={() => window.open(payosCheckoutUrl, "_blank")} style={{ padding: "8px 12px", background: "#10b981", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer" }}>
                     Mở link
                   </button>
-                  <button onClick={() => { setShowPayosQr(false); setPayosCheckoutUrl(""); }} style={{ padding: "8px 12px", background: "#ef4444", color: "#fff", border: "none", borderRadius: 8 }}>
+                  <button onClick={handleConfirmPayment} style={{ padding: "8px 12px", background: "#8b5cf6", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 600 }}>
+                    Xác nhận đã TT
+                  </button>
+                  <button onClick={() => { setShowPayosQr(false); setPayosCheckoutUrl(""); }} style={{ padding: "8px 12px", background: "#ef4444", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer" }}>
                     Đóng
                   </button>
                 </div>

@@ -44,3 +44,8 @@ export const fetchAdminDebtReport = async (): Promise<DebtReportResponse> => {
   const res = await axios.get(`${API_BASE}/api/withdrawals/report/debts`);
   return res.data;
 };
+
+export const resetSystemFinancials = async (): Promise<{ success: boolean; message: string }> => {
+  const res = await axios.post(`${API_BASE}/api/withdrawals/reset-financials`);
+  return res.data;
+};

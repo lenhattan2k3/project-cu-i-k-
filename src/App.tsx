@@ -17,7 +17,7 @@ export default function App() {
         <Route path="/register" element={<Register />} />
         <Route path="/login" element={<Login />} />
         <Route path="/homeuser/*" element={<HomeUser />} />
-        <Route path="/homepartner" element={<HomePartner />} />
+        <Route path="/homepartner/*" element={<HomePartner />} />
         <Route path="/homeadmin" element={<HomeAdmin />} />
         <Route path="/payment-success" element={<PaymentSuccess />} />
       </Routes>

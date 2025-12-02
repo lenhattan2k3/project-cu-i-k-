@@ -21,7 +21,7 @@ import {
 	Wallet,
 } from "lucide-react";
 import type { DebtReportResponse } from "../../api/debtReportApi";
-import { fetchAdminDebtReport } from "../../api/debtReportApi";
+import { fetchAdminDebtReport, resetSystemFinancials } from "../../api/debtReportApi";
 
 // ✅ MAPPING TÊN NHÀ XE
 const NHA_XE_MAPPING: Record<string, string> = {
@@ -81,6 +81,24 @@ export default function AdminDebtReport() {
 			const message = err instanceof Error ? err.message : "Không thể tải báo cáo.";
 			setError(message);
 		} finally {
+			setLoading(false);
+		}
+	};
+
+	const handleReset = async () => {
+		if (!confirm("⚠️ CẢNH BÁO QUAN TRỌNG:\n\nHành động này sẽ XÓA TOÀN BỘ dữ liệu tài chính của hệ thống bao gồm:\n- Tất cả Booking (Vé)\n- Tất cả Lịch sử rút tiền (Withdrawals)\n- Tất cả Sổ cái (Ledgers)\n- Tất cả Hóa đơn & Thanh toán (Invoices, Payments)\n\nDữ liệu sẽ trở về 0 và KHÔNG THỂ KHÔI PHỤC.\n\nBạn có chắc chắn muốn tiếp tục?")) {
+			return;
+		}
+		
+		if (!confirm("Xác nhận lần cuối: Bạn thực sự muốn xóa sạch dữ liệu và bắt đầu lại từ đầu?")) return;
+
+		try {
+			setLoading(true);
+			await resetSystemFinancials();
+			alert("✅ Đã reset toàn bộ hệ thống thành công! Mọi số liệu đã trở về 0.");
+			loadReport();
+		} catch (err) {
+			alert("❌ Lỗi khi reset: " + (err instanceof Error ? err.message : String(err)));
 			setLoading(false);
 		}
 	};
@@ -185,9 +203,9 @@ export default function AdminDebtReport() {
 			icon: <BadgeDollarSign size={22} />,
 		},
 		{
-			title: "Phí dịch vụ",
+			title: "Tổng phí dịch vụ",
 			value: money.format(summary.totalServiceFee),
-			description: "Admin phải thu",
+			description: "Tổng phát sinh từ booking",
 			accent: "linear-gradient(135deg,#bfdbfe,#3b82f6)",
 			icon: <Gauge size={22} />,
 		},
@@ -199,9 +217,9 @@ export default function AdminDebtReport() {
 			icon: <CheckCircle2 size={22} />,
 		},
 		{
-			title: "Phí còn phải thu",
+			title: "Phí dịch vụ phải thu",
 			value: money.format(summary.feeOutstanding),
-			description: "Service fee balance",
+			description: "Số tiền nhà xe còn nợ",
 			accent: "linear-gradient(135deg,#fecaca,#ef4444)",
 			icon: <ShieldAlert size={22} />,
 		},
@@ -393,12 +411,20 @@ export default function AdminDebtReport() {
 						<h2 style={{ margin: 0 }}>Sơ đồ dòng tiền &amp; phí dịch vụ</h2>
 						<p style={{ color: "#475569", margin: 0 }}>Dựa trên cùng logic của dashboard nhà xe → không lệch số liệu.</p>
 					</div>
-					<button
-						onClick={loadReport}
-						style={{ border: "none", background: "#2563eb", color: "white", padding: "10px 18px", borderRadius: 999, display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}
-					>
-						<RefreshCw size={18} /> Làm mới
-					</button>
+					<div style={{ display: "flex", gap: 12 }}>
+						<button
+							onClick={handleReset}
+							style={{ border: "none", background: "#ef4444", color: "white", padding: "10px 18px", borderRadius: 999, display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontWeight: 600 }}
+						>
+							<ShieldAlert size={18} /> Reset Hệ Thống
+						</button>
+						<button
+							onClick={loadReport}
+							style={{ border: "none", background: "#2563eb", color: "white", padding: "10px 18px", borderRadius: 999, display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}
+						>
+							<RefreshCw size={18} /> Làm mới
+						</button>
+					</div>
 				</div>
 				<div className="adr-flow">
 					{flow.map((step) => (
@@ -505,7 +531,7 @@ export default function AdminDebtReport() {
 								<th>Nhà xe</th>
 								<th>ID</th>
 								<th>Doanh thu</th>
-								<th>Phí còn phải thu</th>
+								<th>Phí dịch vụ phải thu</th>
 								<th>Trạng thái</th>
 								<th>Cập nhật gần nhất</th>
 							</tr>
@@ -523,7 +549,13 @@ export default function AdminDebtReport() {
 										<td style={{ fontWeight: 600 }}>{getNhaXeName(partner.partnerId, partner.partnerName)}</td>
 										<td style={{ fontFamily: "monospace" }}>{partner.partnerId}</td>
 										<td>{money.format(partner.totalRevenue)}</td>
-										<td>{money.format(partner.serviceFeeBalance)}</td>
+										<td>
+											{partner.feeStatus === "settled" ? (
+												<span style={{ color: "#16a34a", fontWeight: 600 }}>Đã thanh toán</span>
+											) : (
+												money.format(partner.serviceFeeBalance)
+											)}
+										</td>
 										<td>
 											<span
 												className="adr-badge"

@@ -74,7 +74,7 @@ const BankFormStyles = () => (
 
     .payment-content-wrapper {
       width: 100%;
-      max-width: 1300px;
+      max-width: 1700px;
     }
 
     .payment-page-title {

@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useLocation, useNavigate, Routes, Route, Navigate } from "react-router-dom";
 import MenuBar from "./menu/MenuBar";
 import { FaUserCircle } from "react-icons/fa";
+import { useRoleGuard } from "../hooks/useRoleGuard";
 
 import SearchTrip from "./components/SearchTrip";
 import Booking from "./components/Booking";
@@ -19,7 +20,7 @@ export default function HomeUser() {
   const pathAfterHome = location.pathname.replace(/^\/homeuser\/?/, "");
   const activeTab = pathAfterHome ? pathAfterHome.split("/")[0] || "search" : "search";
   const [bgImage, setBgImage] = useState("");
-  const [user, setUser] = useState<any>(null);
+  const user = useRoleGuard("user");
   const [invoiceContext, setInvoiceContext] = useState<{ highlightOrderCode?: string; bannerMessage?: string }>({});
 
   useEffect(() => {
@@ -41,13 +42,8 @@ export default function HomeUser() {
   }, [location.state, activeTab, navigate]);
 
   useEffect(() => {
-    const storedUser = localStorage.getItem("user");
-    if (storedUser) {
-      setUser(JSON.parse(storedUser));
-    }
-  }, []);
+    window.scrollTo({ top: 0, behavior: "smooth" });
 
-  useEffect(() => {
    // Chỉ giữ lại ảnh nền theo từng tab
 const images: Record<string, { bg: string }> = {
   search: {
@@ -103,7 +99,19 @@ setBgImage(currentImages.bg);
           background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 30%, #60a5fa 70%, #93c5fd 100%);
           font-family: 'Poppins', 'Segoe UI', sans-serif;
           position: relative;
-          overflow-x: hidden;
+          /* overflow-x: hidden; REMOVED to allow sticky to work */
+        }
+
+        /* Wrapper for background animations to prevent scrollbars */
+        .animation-wrapper {
+          position: fixed;
+          top: 0;
+          left: 0;
+          width: 100%;
+          height: 100%;
+          overflow: hidden;
+          pointer-events: none;
+          z-index: 0;
         }
 
         /* Floating vehicles animation */
@@ -245,9 +253,6 @@ setBgImage(currentImages.bg);
           box-shadow: 0 8px 32px rgba(30, 64, 175, 0.3);
           border-radius: 0 0 30px 30px;
           margin: 0 20px;
-        invoices: {
-          bg: "https://images.unsplash.com/photo-1469474968028-56623f02e42e?auto=format&fit=crop&w=1500&q=80"
-        },
           margin-top: 20px;
           z-index: 10;
           position: relative;
@@ -880,56 +885,56 @@ header::after {
 
       `}</style>
 
-      {/* Floating vehicles */}
-      <div className="floating-vehicle"></div>
-      <div className="floating-vehicle"></div>
-      <div className="floating-vehicle"></div>
-      <div className="floating-vehicle"></div>
+      <div className="animation-wrapper">
+        {/* Floating vehicles */}
+        <div className="floating-vehicle"></div>
+        <div className="floating-vehicle"></div>
+        <div className="floating-vehicle"></div>
+        <div className="floating-vehicle"></div>
 
-      {/* Floating particles */}
-      <div className="particle"></div>
-      <div className="particle"></div>
-      <div className="particle"></div>
-      <div className="particle"></div>
-      <div className="particle"></div>
+        {/* Floating particles */}
+        <div className="particle"></div>
+        <div className="particle"></div>
+        <div className="particle"></div>
+        <div className="particle"></div>
+        <div className="particle"></div>
 
-      {/* Ảnh nền động với parallax */}
-      <div className="background-layers">
-        <div className="background-layer" style={{ backgroundImage: `url(${bgImage})` }}></div>
-        <div className="background-layer" style={{ backgroundImage: `url(${bgImage})` }}></div>
+        {/* Ảnh nền động với parallax */}
+        <div className="background-layers">
+          <div className="background-layer" style={{ backgroundImage: `url(${bgImage})` }}></div>
+          <div className="background-layer" style={{ backgroundImage: `url(${bgImage})` }}></div>
+        </div>
+
+        {/* Floating buses */}
+        <div className="floating-bus"></div>
+        <div className="floating-bus"></div>
+        <div className="floating-bus"></div>
+        <div className="floating-bus"></div>
+
+        {/* Road lines */}
+        <div className="road-lines">
+          <div className="road-line"></div>
+          <div className="road-line"></div>
+          <div className="road-line"></div>
+          <div className="road-line"></div>
+          <div className="road-line"></div>
+        </div>
+
+        {/* Speedometer */}
+        <div className="speedometer"></div>
+
+        {/* Traffic light */}
+        <div className="traffic-light"></div>
+
+        {/* Floating particles */}
+        <div className="particle"></div>
+        <div className="particle"></div>
+        <div className="particle"></div>
+        <div className="particle"></div>
+        <div className="particle"></div>
+
+        <div className="glow-effect"></div>
       </div>
-
-      
-
-      {/* Floating buses */}
-      <div className="floating-bus"></div>
-      <div className="floating-bus"></div>
-      <div className="floating-bus"></div>
-      <div className="floating-bus"></div>
-
-      {/* Road lines */}
-      <div className="road-lines">
-        <div className="road-line"></div>
-        <div className="road-line"></div>
-        <div className="road-line"></div>
-        <div className="road-line"></div>
-        <div className="road-line"></div>
-      </div>
-
-      {/* Speedometer */}
-      <div className="speedometer"></div>
-
-      {/* Traffic light */}
-      <div className="traffic-light"></div>
-
-      {/* Floating particles */}
-      <div className="particle"></div>
-      <div className="particle"></div>
-      <div className="particle"></div>
-      <div className="particle"></div>
-      <div className="particle"></div>
-
-      <div className="glow-effect"></div>
 
       {/* Header */}
         <header>

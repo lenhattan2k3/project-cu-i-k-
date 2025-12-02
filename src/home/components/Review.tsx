@@ -925,7 +925,7 @@ const styles: Record<string, React.CSSProperties> = {
     color: palette.text,
   },
   container: {
-    maxWidth: "1740px",
+    maxWidth: "1900px",
     margin: "0 auto",
   },
   pageHeader: {

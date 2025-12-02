@@ -49,9 +49,12 @@ export const uploadToCloudinary = async (file: File): Promise<string | null> => 
   formData.append("upload_preset", "unsigned_upload"); 
   formData.append("cloud_name", "dxgsnkyr5");
 
+  // Determine resource type based on file type
+  const resourceType = file.type.startsWith("video/") ? "video" : "image";
+
   try {
     const res = await fetch(
-      "https://api.cloudinary.com/v1_1/dxgsnkyr5/image/upload",
+      `https://api.cloudinary.com/v1_1/dxgsnkyr5/${resourceType}/upload`,
       {
         method: "POST",
         body: formData,

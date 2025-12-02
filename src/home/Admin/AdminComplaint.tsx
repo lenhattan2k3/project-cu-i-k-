@@ -30,7 +30,6 @@ export default function AdminComplaint() {
   const [complaints, setComplaints] = useState<Complaint[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [sendTarget, setSendTarget] = useState<"partner" | "user">("partner");
   const [sendMessage, setSendMessage] = useState("");
   const [sendLoading, setSendLoading] = useState(false);
   const [replyMap, setReplyMap] = useState<Record<string, string>>({});
@@ -87,7 +86,7 @@ export default function AdminComplaint() {
       await sendComplaint({
         senderId: "admin",
         senderRole: "admin",
-        receiverRole: sendTarget,
+        receiverRole: "partner",
         message: sendMessage,
       });
       setSendMessage("");
@@ -166,35 +165,20 @@ export default function AdminComplaint() {
         >
           <div>
             <h3 style={{ marginBottom: "12px" }}>📨 Gửi thông báo khiếu nại</h3>
-            <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
-              <select
-                value={sendTarget}
-                onChange={(e) => setSendTarget(e.target.value as "partner" | "user")}
-                style={{
-                  padding: "10px",
-                  borderRadius: "8px",
-                  border: "1px solid #cbd5f5",
-                  minWidth: "180px",
-                }}
-              >
-                <option value="partner">Gửi tới Nhà xe</option>
-                <option value="user">Gửi tới Người dùng</option>
-              </select>
-              <textarea
-                value={sendMessage}
-                onChange={(e) => setSendMessage(e.target.value)}
-                placeholder="Nhập nội dung khiếu nại..."
-                rows={3}
-                style={{
-                  flex: 1,
-                  minWidth: "280px",
-                  padding: "10px",
-                  borderRadius: "8px",
-                  border: "1px solid #cbd5f5",
-                  resize: "vertical",
-                }}
-              />
-            </div>
+            <textarea
+              value={sendMessage}
+              onChange={(e) => setSendMessage(e.target.value)}
+              placeholder="Nhập nội dung khiếu nại..."
+              rows={3}
+              style={{
+                width: "100%",
+                minWidth: "280px",
+                padding: "10px",
+                borderRadius: "8px",
+                border: "1px solid #cbd5f5",
+                resize: "vertical",
+              }}
+            />
             <button
               onClick={handleSendComplaint}
               disabled={sendLoading}

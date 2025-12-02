@@ -16,7 +16,9 @@ export const createPaymentLink = async (
   bookingId: string,   // booking liên quan
   amount: number,
   description: string,
-  orderCode: number
+  orderCode: number,
+  returnUrl?: string,
+  cancelUrl?: string
 ) => {
   try {
     const res = await API.post("/payos/create-payment", {
@@ -25,6 +27,8 @@ export const createPaymentLink = async (
       amount,
       description,
       orderCode,
+      returnUrl,
+      cancelUrl,
     });
 
     return res.data; // BE trả về { success, paymentLink, payment }

@@ -11,12 +11,23 @@ interface Notification {
   senderRole?: string;
 }
 
+type ReceiverScope = "all" | "partners" | "partner";
+
+const PARTNER_DIRECTORY: Array<{ id: string; name: string }> = [
+  { id: "yft1Ag1eaRf3uCigXyCJLpmu9R42", name: "Phúc Yên" },
+  { id: "SFbbzut0USTG5F6ZM3COrLXKGS93", name: "Cúc Tư" },
+  { id: "BuPwvEMgfCNEDbz2VNKx5hnpBT52", name: "Hồng Sơn" },
+  { id: "U5XWQ12kL8VnyQ0ovZTvUZLdJov1", name: "Nhật Tân" },
+];
+
 export default function AdminNotifications() {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
   const [image, setImage] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string>("");
+  const [receiverScope, setReceiverScope] = useState<ReceiverScope>("all");
+  const [targetPartnerId, setTargetPartnerId] = useState("");
 
   // 🟢 Lấy danh sách thông báo
   const fetchNotifications = async () => {
@@ -32,10 +43,21 @@ export default function AdminNotifications() {
     fetchNotifications();
   }, []);
 
+  useEffect(() => {
+    if (receiverScope !== "partner") {
+      setTargetPartnerId("");
+    }
+  }, [receiverScope]);
+
   // 🟢 Gửi thông báo
   const handleSendNotification = async () => {
     if (!title || !content) {
       alert("⚠️ Vui lòng nhập tiêu đề và nội dung!");
+      return;
+    }
+
+    if (receiverScope === "partner" && !targetPartnerId.trim()) {
+      alert("⚠️ Vui lòng nhập Partner ID cụ thể!");
       return;
     }
 
@@ -44,7 +66,17 @@ export default function AdminNotifications() {
       formData.append("title", title);
       formData.append("content", content);
       formData.append("sender", "admin");
-      formData.append("receivers", "all");
+      formData.append("receiverScope", receiverScope);
+
+      if (receiverScope === "partner") {
+        const partnerId = targetPartnerId.trim();
+        formData.append("partnerId", partnerId);
+        formData.append("receivers", `partner:${partnerId}`);
+      } else if (receiverScope === "partners") {
+        formData.append("receivers", "partners");
+      } else {
+        formData.append("receivers", "all");
+      }
       if (image) formData.append("image", image);
 
       const res = await fetch("http://localhost:5000/api/notifications", {
@@ -59,6 +91,7 @@ export default function AdminNotifications() {
       setContent("");
       setImage(null);
       setImagePreview("");
+      setReceiverScope("all");
       fetchNotifications();
     } catch (error) {
       console.error("❌ Lỗi gửi thông báo:", error);
@@ -199,6 +232,83 @@ export default function AdminNotifications() {
             e.target.style.boxShadow = "none";
           }}
         />
+
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: receiverScope === "partner" ? "1fr 1.5fr" : "1fr",
+            gap: "12px",
+            marginBottom: "12px",
+            alignItems: "stretch",
+          }}
+        >
+          <label style={{ display: "flex", flexDirection: "column", gap: "6px", fontSize: "14px", color: "#1e3a8a" }}>
+            Đối tượng nhận
+            <select
+              value={receiverScope}
+              onChange={(e) => setReceiverScope(e.target.value as ReceiverScope)}
+              style={{
+                padding: "10px 14px",
+                borderRadius: "10px",
+                border: "1.5px solid #dbeafe",
+                fontSize: "14px",
+                backgroundColor: "#f8fafc",
+                color: "#1e293b",
+              }}
+            >
+              <option value="all">Toàn bộ hệ thống</option>
+              <option value="partners">Toàn bộ partner</option>
+              <option value="partner">Partner cụ thể</option>
+            </select>
+          </label>
+
+          {receiverScope === "partner" && (
+            <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+              <label style={{ display: "flex", flexDirection: "column", gap: "6px", fontSize: "14px", color: "#1e3a8a" }}>
+                Chọn partner trong hệ thống
+                <select
+                  value={PARTNER_DIRECTORY.some((p) => p.id === targetPartnerId) ? targetPartnerId : ""}
+                  onChange={(e) => setTargetPartnerId(e.target.value)}
+                  style={{
+                    padding: "10px 14px",
+                    borderRadius: "10px",
+                    border: "1.5px solid #dbeafe",
+                    fontSize: "14px",
+                    backgroundColor: "#f8fafc",
+                    color: "#1e293b",
+                  }}
+                >
+                  <option value="">-- Chọn một partner --</option>
+                  {PARTNER_DIRECTORY.map((partner) => (
+                    <option key={partner.id} value={partner.id}>
+                      {partner.name} — {partner.id}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label style={{ display: "flex", flexDirection: "column", gap: "6px", fontSize: "14px", color: "#1e3a8a" }}>
+                Hoặc nhập Partner ID thủ công
+                <input
+                  type="text"
+                  placeholder="Nhập partnerId..."
+                  value={targetPartnerId}
+                  onChange={(e) => setTargetPartnerId(e.target.value)}
+                  style={{
+                    padding: "10px 14px",
+                    borderRadius: "10px",
+                    border: "1.5px solid #dbeafe",
+                    fontSize: "14px",
+                    backgroundColor: "#f8fafc",
+                    color: "#1e293b",
+                  }}
+                />
+                <span style={{ fontSize: "12px", color: "#475569" }}>
+                  Danh sách đang có {PARTNER_DIRECTORY.length} partner được khai báo.
+                </span>
+              </label>
+            </div>
+          )}
+        </div>
 
         <div style={{ marginBottom: "12px" }}>
           <label

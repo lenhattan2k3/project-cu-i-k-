@@ -245,7 +245,7 @@ const handleSubmitReview = async (e: React.FormEvent) => {
         fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
       }}
     >
-      <div style={{ maxWidth: "1500px", margin: "0 auto" }}>
+      <div style={{ maxWidth: "1900px", margin: "0 auto" }}>
         <h1
           style={{
             textAlign: "center",

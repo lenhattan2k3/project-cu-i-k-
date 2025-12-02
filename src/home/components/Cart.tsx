@@ -1494,7 +1494,7 @@ const [selectedTab, setSelectedTab] = useState<"pending" | "paid" | "cancelled">
               <div className="card-header">
                 <div className="card-nhaxe-info">
                   <span className="card-nhaxe-type">{b.tripId?.loaiXe || "Xe khách"}</span>
-                  <h3 className="card-nhaxe-name">{b.tripId?.tenNhaXe || "Nhà xe"}</h3>
+                  <h3 className="card-nhaxe-name">{b.tripId?.nhaXe || "Nhà xe"}</h3>
                 </div>
                 <div className="card-rating">
                   {b.tripId?.rating || "4.5"}
@@ -1503,7 +1503,7 @@ const [selectedTab, setSelectedTab] = useState<"pending" | "paid" | "cancelled">
 
               {/* Info Tags */}
               <div className="card-tags">
-                <span className="card-tag">{b.tripId?.loaiGhe || "Giường nằm"}</span>
+                <span className="card-tag">{b.tripId?.loaiXe || "Giường nằm"}</span>
                 <span className="card-tag date">📅 {b.tripId?.ngayKhoiHanh || "N/A"}</span>
                 <span className="card-tag seat">🪑 Ghế: {b.soGhe.join(", ")}</span>
                 <span className="card-tag price">💰 {b.totalPrice?.toLocaleString()}₫</span>
@@ -1522,18 +1522,45 @@ const [selectedTab, setSelectedTab] = useState<"pending" | "paid" | "cancelled">
                 </div>
                 <div className="route-info">
                   <div className="route-point">
-                    <span className="route-city">{b.tripId?.diemDi || "Điểm đi"}</span>
+                    <span className="route-city">{b.tripId?.tu || "Điểm đi"}</span>
                   </div>
-                  <span className="route-duration">~ {b.tripId?.thoiGianDiChuyen || "5h 30m"} • {b.tripId?.loaiDuong || "Đường cao tốc"}</span>
+                  <span className="route-duration">
+                    {b.tripId?.thoiGianDiChuyen ? `~ ${b.tripId.thoiGianDiChuyen}` : ""} 
+                    {b.tripId?.loaiDuong ? ` • ${b.tripId.loaiDuong}` : ""}
+                  </span>
                   <div className="route-point">
-                    <span className="route-city">{b.tripId?.diemDen || "Điểm đến"}</span>
+                    <span className="route-city">{b.tripId?.den || "Điểm đến"}</span>
                   </div>
                 </div>
               </div>
 
+              {/* Pickup Point Display */}
+              {b.diemDonChiTiet && (
+                <div style={{ 
+                  fontSize: '0.85rem', 
+                  color: '#4b5563', 
+                  marginBottom: '12px', 
+                  display: 'flex', 
+                  alignItems: 'flex-start', 
+                  gap: '6px',
+                  background: '#f0f9ff',
+                  padding: '8px 12px',
+                  borderRadius: '8px',
+                  border: '1px dashed #bae6fd'
+                }}>
+                   <span style={{ flexShrink: 0 }}>📍</span> 
+                   <span><strong>Điểm đón:</strong> {b.diemDonChiTiet}</span>
+                </div>
+              )}
+
               {/* Amenities */}
               <div className="card-amenities">
-                {(b.tripId?.tienIch || ["Wifi", "Nước uống", "Điều hòa"]).slice(0, 4).map((item: string, i: number) => (
+                {(Array.isArray(b.tripId?.tienIch) 
+                  ? b.tripId.tienIch 
+                  : (typeof b.tripId?.tienIch === 'string' 
+                      ? b.tripId.tienIch.split(',').map((s: string) => s.trim()) 
+                      : ["Wifi", "Nước uống", "Điều hòa"])
+                ).slice(0, 4).map((item: string, i: number) => (
                   <span key={i} className="amenity-item">{item}</span>
                 ))}
               </div>
@@ -1932,6 +1959,14 @@ const [selectedTab, setSelectedTab] = useState<"pending" | "paid" | "cancelled">
               <strong>Ghế:</strong> {selectedBooking.soGhe.join(', ')}
             </span>
           </div>
+          {selectedBooking.diemDonChiTiet && (
+            <div className="ticket-info-row">
+              <span>📍</span>
+              <span>
+                <strong>Điểm đón:</strong> {selectedBooking.diemDonChiTiet}
+              </span>
+            </div>
+          )}
           <div className="ticket-info-row">
             <span>🚌</span>
             <span>

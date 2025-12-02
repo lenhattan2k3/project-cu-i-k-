@@ -10,6 +10,20 @@ import {
 } from "../../api/reviewApi";
 import { uploadToCloudinary } from "../../api/uploadToCloudinary";
 import { socket } from "../../utils/socket";
+import { 
+  MessageSquare, 
+  Star, 
+  User, 
+  Phone, 
+  Armchair, 
+  DollarSign, 
+  Send, 
+  Image as ImageIcon, 
+  Trash2, 
+  X, 
+  AlertCircle,
+  Lock
+} from "lucide-react";
 
 // ---------- Types & Utils ----------
 interface ReviewEx extends Review {
@@ -218,41 +232,46 @@ export default function PartnerReview(): React.ReactElement {
 
   if (!partnerId)
     return (
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh", background: "#F3F4F6" }}>
-        <div style={{ textAlign: "center", padding: "40px", background: "white", borderRadius: "16px", boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.1)" }}>
-          <div style={{ fontSize: "48px", marginBottom: "16px" }}>🔐</div>
-          <h2 style={{ fontSize: "24px", fontWeight: "700", color: "#1F2937", marginBottom: "8px" }}>Yêu cầu đăng nhập</h2>
-          <p style={{ color: "#6B7280", fontSize: "16px" }}>Vui lòng đăng nhập tài khoản đối tác để xem đánh giá.</p>
+      <div className="flex items-center justify-center min-h-screen bg-slate-50 p-6">
+        <div className="bg-white p-8 rounded-2xl shadow-lg text-center max-w-md border border-slate-100">
+          <div className="w-16 h-16 bg-slate-100 text-slate-500 rounded-full flex items-center justify-center mx-auto mb-4">
+            <Lock size={32} />
+          </div>
+          <h2 className="text-xl font-bold text-slate-800 mb-2">Yêu cầu đăng nhập</h2>
+          <p className="text-slate-600">Vui lòng đăng nhập tài khoản đối tác để xem đánh giá.</p>
         </div>
       </div>
     );
 
   return (
-    <div style={{ background: "#F3F4F6", padding: "32px", minHeight: "100vh", fontFamily: "'Inter', sans-serif" }}>
+    <div className="min-h-screen bg-slate-50 p-4 md:p-8 font-sans text-slate-800">
       {/* Page Header */}
-      <div style={{ maxWidth: "1200px", margin: "0 auto 24px auto" }}>
-        <h1 style={{ fontSize: "30px", fontWeight: 800, color: "#111827", margin: 0, letterSpacing: "-0.025em" }}>
+      <div className="max-w-7xl mx-auto mb-8">
+        <h1 className="text-3xl font-bold text-slate-900 flex items-center gap-3">
+          <MessageSquare className="text-blue-600" />
           Đánh giá & Phản hồi
         </h1>
-        <p style={{ fontSize: "16px", color: "#6B7280", marginTop: "8px" }}>
+        <p className="text-slate-500 mt-1">
           Xem và trả lời các đánh giá từ khách hàng của bạn.
         </p>
       </div>
 
       {/* Content Area */}
       {loading ? (
-        <div style={{ textAlign: "center", padding: "60px" }}>
-          <div className="animate-spin" style={{ display: "inline-block", width: "32px", height: "32px", border: "3px solid #E5E7EB", borderTopColor: "#3B82F6", borderRadius: "50%" }}></div>
-          <p style={{ marginTop: "16px", color: "#6B7280" }}>Đang tải dữ liệu...</p>
+        <div className="flex flex-col items-center justify-center py-20">
+          <div className="w-10 h-10 border-4 border-slate-200 border-t-blue-600 rounded-full animate-spin"></div>
+          <p className="mt-4 text-slate-500 font-medium">Đang tải dữ liệu...</p>
         </div>
       ) : reviews.length === 0 ? (
-        <div style={{ background: "white", borderRadius: "16px", padding: "60px", maxWidth: "600px", margin: "40px auto", textAlign: "center", boxShadow: "0 1px 3px 0 rgba(0, 0, 0, 0.1)" }}>
-          <div style={{ fontSize: "64px", marginBottom: "20px" }}>📝</div>
-          <h3 style={{ fontSize: "20px", fontWeight: 700, color: "#111827", marginBottom: "8px" }}>Chưa có đánh giá nào</h3>
-          <p style={{ color: "#6B7280" }}>Hiện tại chưa có khách hàng nào để lại đánh giá cho dịch vụ của bạn.</p>
+        <div className="bg-white rounded-2xl p-12 max-w-2xl mx-auto text-center shadow-sm border border-slate-200">
+          <div className="w-20 h-20 bg-slate-50 text-slate-300 rounded-full flex items-center justify-center mx-auto mb-6">
+            <MessageSquare size={40} />
+          </div>
+          <h3 className="text-xl font-bold text-slate-800 mb-2">Chưa có đánh giá nào</h3>
+          <p className="text-slate-500">Hiện tại chưa có khách hàng nào để lại đánh giá cho dịch vụ của bạn.</p>
         </div>
       ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: "24px", maxWidth: "1200px", margin: "0 auto" }}>
+        <div className="flex flex-col gap-6 max-w-7xl mx-auto">
           {reviews.map((r: ReviewEx) => {
             if (!r || !r._id) return null;
             const id = r._id;
@@ -260,69 +279,46 @@ export default function PartnerReview(): React.ReactElement {
             const sending = sendingMap[id] || false;
 
             return (
-              <div key={id} style={{ 
-                position: "relative",
-                display: "grid", 
-                gridTemplateColumns: "300px 1fr", 
-                background: "white", 
-                borderRadius: "16px", 
-                boxShadow: "0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06)",
-                border: "1px solid #E5E7EB",
-                overflow: "hidden",
-                minHeight: "400px"
-              }}>
-
-                <button
-                  onClick={() => handleDeleteReview(id)}
-                  disabled={deletingMap[id]}
-                  style={{
-                    position: "absolute",
-                    top: "16px",
-                    right: "16px",
-                    border: "none",
-                    borderRadius: "999px",
-                    padding: "6px 14px",
-                    background: deletingMap[id] ? "#F87171" : "#DC2626",
-                    color: "white",
-                    fontWeight: 600,
-                    fontSize: "12px",
-                    letterSpacing: "0.02em",
-                    cursor: deletingMap[id] ? "not-allowed" : "pointer",
-                    boxShadow: "0 4px 10px rgba(220,38,38,0.25)",
-                  }}
-                >
-                  {deletingMap[id] ? "Đang xoá..." : "Xoá đánh giá"}
-                </button>
+              <div key={id} className="relative flex flex-col bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
                 
-                {/* LEFT COLUMN: REVIEW DETAILS */}
-                <div style={{ padding: "24px", borderRight: "1px solid #F3F4F6", background: "#FAFAFA" }}>
-                  <div style={{ marginBottom: "20px" }}>
-                    <span style={{ fontSize: "12px", fontWeight: "600", color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.05em" }}>Chuyến xe</span>
-                    <h3 style={{ fontSize: "18px", fontWeight: 700, color: "#111827", margin: "4px 0 0 0", lineHeight: "1.4" }}>
-                      {r.tenChuyen || "Chuyến đi không tên"}
-                    </h3>
+                {/* TOP SECTION: REVIEW DETAILS */}
+                <div className="p-6 border-b border-slate-100 bg-slate-50/50">
+                  <div className="flex justify-between items-start mb-6">
+                    <div>
+                      <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Chuyến xe</span>
+                      <h3 className="text-lg font-bold text-slate-900 mt-1 leading-snug">
+                        {r.tenChuyen || "Chuyến đi không tên"}
+                      </h3>
+                      <div className="mt-2">
+                        <StarRating rating={r.rating ?? 0} />
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleDeleteReview(id)}
+                      disabled={deletingMap[id]}
+                      className={`p-2 rounded-lg transition-colors ${deletingMap[id] ? "bg-red-100 text-red-400 cursor-not-allowed" : "bg-white text-slate-400 hover:text-red-600 hover:bg-red-50 border border-slate-200"}`}
+                      title="Xóa đánh giá"
+                    >
+                      <Trash2 size={18} />
+                    </button>
                   </div>
                   
-                  <div style={{ marginBottom: "24px" }}>
-                    <StarRating rating={r.rating ?? 0} />
-                  </div>
-                  
-                  <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-                    <DetailItem label="Khách hàng" value={r.hoTen || "Ẩn danh"} icon="👤" />
-                    <DetailItem label="Số điện thoại" value={r.sdt || "---"} icon="📞" />
-                    <DetailItem label="Số ghế" value={(r.soGhe || []).join(", ") || "---"} icon="💺" />
-                    <DetailItem label="Tổng tiền" value={r.totalPrice ? `${r.totalPrice.toLocaleString("vi-VN")}đ` : "---"} icon="💰" />
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <DetailItem label="Khách hàng" value={r.hoTen || "Ẩn danh"} icon={<User size={16} className="text-blue-600" />} />
+                    <DetailItem label="Số điện thoại" value={r.sdt || "---"} icon={<Phone size={16} className="text-emerald-600" />} />
+                    <DetailItem label="Số ghế" value={(r.soGhe || []).join(", ") || "---"} icon={<Armchair size={16} className="text-amber-600" />} />
+                    <DetailItem label="Tổng tiền" value={r.totalPrice ? `${r.totalPrice.toLocaleString("vi-VN")}đ` : "---"} icon={<DollarSign size={16} className="text-violet-600" />} />
                   </div>
                 </div>
                 
-                {/* RIGHT COLUMN: CONVERSATION */}
-                <div style={{ display: "flex", flexDirection: "column", height: "100%", maxHeight: "600px" }}>
+                {/* BOTTOM SECTION: CONVERSATION */}
+                <div className="flex flex-col h-[500px]">
                   
                   {/* Chat History */}
-                  <div style={{ flex: 1, overflowY: "auto", padding: "24px", display: "flex", flexDirection: "column", gap: "20px", background: "#FFFFFF" }}>
+                  <div className="flex-1 overflow-y-auto p-6 flex flex-col gap-6 bg-white">
                     {messages.length === 0 ? (
-                      <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", color: "#9CA3AF", opacity: 0.8 }}>
-                        <div style={{ fontSize: "40px", marginBottom: "12px" }}>💬</div>
+                      <div className="flex-1 flex flex-col items-center justify-center text-slate-300">
+                        <MessageSquare size={48} className="mb-3 opacity-20" />
                         <p>Chưa có nội dung phản hồi.</p>
                       </div>
                     ) : (
@@ -350,82 +346,61 @@ export default function PartnerReview(): React.ReactElement {
                   </div>
 
                   {/* Input Area */}
-                  <div style={{ padding: "16px 24px", borderTop: "1px solid #F3F4F6", background: "#FAFAFA" }}>
-                    <div style={{ position: "relative" }}>
+                  <div className="p-4 border-t border-slate-100 bg-slate-50">
+                    <div className="relative">
                       {previewMap[id] && (
-                        <div style={{ position: "absolute", bottom: "100%", left: 0, marginBottom: "12px", background: "white", padding: "8px", borderRadius: "12px", boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.1)", border: "1px solid #E5E7EB" }}>
-                          <img src={previewMap[id]} alt="preview" style={{ width: "80px", height: "80px", objectFit: "cover", borderRadius: "8px" }} />
+                        <div className="absolute bottom-full left-0 mb-3 bg-white p-2 rounded-xl shadow-lg border border-slate-200 animate-in fade-in slide-in-from-bottom-2">
+                          <img src={previewMap[id]} alt="preview" className="w-20 h-20 object-cover rounded-lg" />
                           <button 
                             onClick={() => removeFile(id)} 
-                            style={{ position: "absolute", top: "-8px", right: "-8px", background: "#EF4444", color: "white", borderRadius: "50%", width: "24px", height: "24px", border: "2px solid white", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "14px", fontWeight: "bold" }}
+                            className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center border-2 border-white shadow-sm hover:bg-red-600 transition-colors"
                           >
-                            ✕
+                            <X size={12} strokeWidth={3} />
                           </button>
                         </div>
                       )}
                       
-                      <div style={{ display: "flex", gap: "12px", alignItems: "flex-end" }}>
+                      <div className="flex gap-3 items-end">
                         <label 
                           htmlFor={`file-partner-${id}`} 
-                          style={{ 
-                            cursor: sending ? "not-allowed" : "pointer",
-                            padding: "10px",
-                            borderRadius: "10px",
-                            background: "#F3F4F6",
-                            color: "#6B7280",
-                            display: "flex", alignItems: "center", justifyContent: "center",
-                            transition: "all 0.2s"
-                          }}
+                          className={`
+                            p-3 rounded-xl bg-white border border-slate-200 text-slate-500 hover:text-blue-600 hover:border-blue-200 hover:bg-blue-50 transition-all cursor-pointer shadow-sm
+                            ${sending ? "opacity-50 cursor-not-allowed" : ""}
+                          `}
                           title="Đính kèm ảnh"
                         >
-                          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
+                          <ImageIcon size={20} />
                         </label>
-                        <input id={`file-partner-${id}`} type="file" accept="image/*" onChange={(e) => handleFile(e, id)} disabled={sending} style={{ display: "none" }} />
+                        <input id={`file-partner-${id}`} type="file" accept="image/*" onChange={(e) => handleFile(e, id)} disabled={sending} className="hidden" />
                         
-                        <textarea
-                          value={inputMap[id] || ""}
-                          onChange={(e) => setInputMap((p) => ({ ...p, [id]: e.target.value }))}
-                          placeholder="Nhập nội dung phản hồi..."
-                          disabled={sending}
-                          style={{
-                            flex: 1,
-                            minHeight: "44px",
-                            maxHeight: "120px",
-                            padding: "12px 16px",
-                            borderRadius: "12px",
-                            border: "1px solid #E5E7EB",
-                            fontSize: "14px",
-                            lineHeight: "1.5",
-                            resize: "none",
-                            outline: "none",
-                            background: "white",
-                            boxShadow: "0 1px 2px 0 rgba(0, 0, 0, 0.05)"
-                          }}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter' && !e.shiftKey) {
-                              e.preventDefault();
-                              sendMsg(id);
-                            }
-                          }}
-                        />
+                        <div className="flex-1 relative">
+                          <textarea
+                            value={inputMap[id] || ""}
+                            onChange={(e) => setInputMap((p) => ({ ...p, [id]: e.target.value }))}
+                            placeholder="Nhập nội dung phản hồi..."
+                            disabled={sending}
+                            className="w-full min-h-[48px] max-h-[120px] py-3 px-4 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none resize-none bg-white shadow-sm text-sm"
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' && !e.shiftKey) {
+                                e.preventDefault();
+                                sendMsg(id);
+                              }
+                            }}
+                          />
+                        </div>
                         
                         <button
                           onClick={() => sendMsg(id)}
                           disabled={sending || (!(inputMap[id] || "").trim() && !fileMap[id])}
-                          style={{
-                            padding: "10px 20px",
-                            borderRadius: "10px",
-                            border: "none",
-                            background: sending ? "#9CA3AF" : "#2563EB",
-                            color: "white",
-                            fontWeight: 600,
-                            fontSize: "14px",
-                            cursor: (sending || (!inputMap[id]?.trim() && !fileMap[id])) ? "not-allowed" : "pointer",
-                            transition: "background 0.2s",
-                            height: "44px"
-                          }}
+                          className={`
+                            h-[48px] px-6 rounded-xl font-semibold text-white shadow-sm flex items-center gap-2 transition-all
+                            ${sending || (!inputMap[id]?.trim() && !fileMap[id]) 
+                              ? "bg-slate-300 cursor-not-allowed" 
+                              : "bg-blue-600 hover:bg-blue-700 hover:shadow-md hover:-translate-y-0.5"}
+                          `}
                         >
-                          {sending ? "..." : "Gửi"}
+                          {sending ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Send size={18} />}
+                          <span className="hidden sm:inline">{sending ? "Gửi..." : "Gửi"}</span>
                         </button>
                       </div>
                     </div>
@@ -442,26 +417,30 @@ export default function PartnerReview(): React.ReactElement {
 
 // ---------- Sub-components ----------
 
-const DetailItem = ({ label, value, icon }: { label: string; value: React.ReactNode; icon: string }) => (
-  <div style={{ display: "flex", alignItems: "flex-start", gap: "10px" }}>
-    <span style={{ fontSize: "16px", lineHeight: "1" }}>{icon}</span>
+const DetailItem = ({ label, value, icon }: { label: string; value: React.ReactNode; icon: React.ReactNode }) => (
+  <div className="flex items-start gap-3">
+    <div className="mt-0.5 p-1.5 bg-white rounded-lg border border-slate-100 shadow-sm text-slate-500">
+      {icon}
+    </div>
     <div>
-      <div style={{ fontSize: "12px", color: "#6B7280", marginBottom: "2px" }}>{label}</div>
-      <div style={{ fontSize: "14px", fontWeight: 600, color: "#1F2937" }}>{value}</div>
+      <div className="text-xs text-slate-500 mb-0.5">{label}</div>
+      <div className="text-sm font-semibold text-slate-800">{value}</div>
     </div>
   </div>
 );
 
 const StarRating = ({ rating }: { rating: number }) => (
-  <div style={{ display: "inline-flex", alignItems: "center", background: "#FFF7ED", padding: "6px 12px", borderRadius: "8px", border: "1px solid #FED7AA" }}>
-    <div style={{ display: "flex", gap: "2px", marginRight: "8px" }}>
+  <div className="inline-flex items-center bg-amber-50 px-3 py-1.5 rounded-lg border border-amber-100">
+    <div className="flex gap-0.5 mr-2">
       {Array.from({ length: 5 }, (_, idx) => (
-        <svg key={idx} width="16" height="16" viewBox="0 0 24 24" fill={idx < rating ? "#F59E0B" : "none"} stroke={idx < rating ? "#F59E0B" : "#D1D5DB"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
-        </svg>
+        <Star 
+          key={idx} 
+          size={16} 
+          className={idx < rating ? "fill-amber-400 text-amber-400" : "text-slate-200"} 
+        />
       ))}
     </div>
-    <span style={{ fontSize: "14px", fontWeight: 700, color: "#9A3412" }}>{rating}.0</span>
+    <span className="text-sm font-bold text-amber-700">{rating}.0</span>
   </div>
 );
 
@@ -478,73 +457,57 @@ function ChatBubble({ isUser, avatar, avatarError, setAvatarError, name, date, t
     imageUrl?: string;
   }) {
   
-  const bubbleStyle = isUser 
-    ? { bg: "#F3F4F6", color: "#1F2937", border: "1px solid #E5E7EB", align: "flex-start" }
-    : { bg: "#EFF6FF", color: "#1E3A8A", border: "1px solid #DBEAFE", align: "flex-end" };
-
   return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: bubbleStyle.align, width: "100%" }}>
-      <div style={{ display: "flex", gap: "12px", flexDirection: isUser ? "row" : "row-reverse", maxWidth: "85%" }}>
+    <div className={`flex flex-col w-full ${isUser ? "items-start" : "items-end"}`}>
+      <div className={`flex gap-3 max-w-[85%] ${isUser ? "flex-row" : "flex-row-reverse"}`}>
         {/* Avatar */}
-        <div style={{
-          width: "32px", height: "32px", borderRadius: "50%",
-          background: isUser ? "#E5E7EB" : "#BFDBFE",
-          display: "flex", alignItems: "center", justifyContent: "center",
-          fontSize: "14px", fontWeight: 700, color: isUser ? "#4B5563" : "#1D4ED8",
-          overflow: "hidden", flexShrink: 0, border: "1px solid white", boxShadow: "0 1px 2px rgba(0,0,0,0.1)"
-        }}>
+        <div className={`
+          w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0 border border-white shadow-sm overflow-hidden
+          ${isUser ? "bg-slate-200 text-slate-600" : "bg-blue-100 text-blue-600"}
+        `}>
           {isUser ? (
             (name.charAt(0) || "K").toUpperCase()
           ) : (
             (avatar && !avatarError) ? (
-              <img src={avatar} alt="Avatar" style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={() => setAvatarError && setAvatarError(true)} />
+              <img src={avatar} alt="Avatar" className="w-full h-full object-cover" onError={() => setAvatarError && setAvatarError(true)} />
             ) : (
               (name.charAt(0) || "N").toUpperCase()
             )
           )}
         </div>
 
-        <div style={{ display: "flex", flexDirection: "column", alignItems: bubbleStyle.align }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px", fontSize: "12px" }}>
-            <span style={{ fontWeight: 600, color: "#374151" }}>{name}</span>
-            <span style={{ color: "#9CA3AF" }}>{date}</span>
+        <div className={`flex flex-col ${isUser ? "items-start" : "items-end"}`}>
+          <div className="flex items-center gap-2 mb-1 text-xs">
+            <span className="font-semibold text-slate-700">{name}</span>
+            <span className="text-slate-400">{date}</span>
           </div>
 
-          <div style={{ 
-            background: bubbleStyle.bg,
-            border: bubbleStyle.border,
-            borderRadius: isUser ? "0 12px 12px 12px" : "12px 0 12px 12px",
-            padding: "12px 16px",
-            boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
-            position: "relative"
-          }}>
+          <div className={`
+            p-4 shadow-sm relative
+            ${isUser 
+              ? "bg-white border border-slate-100 rounded-r-2xl rounded-bl-2xl text-slate-800" 
+              : "bg-blue-50 border border-blue-100 rounded-l-2xl rounded-br-2xl text-slate-800"}
+          `}>
             {rating && rating > 0 && (
-              <div style={{ display: "flex", gap: "2px", marginBottom: "8px" }}>
+              <div className="flex gap-0.5 mb-2">
                 {Array.from({ length: 5 }, (_, idx) => (
-                  <span key={idx} style={{ fontSize: "14px", color: idx < rating ? "#F59E0B" : "#D1D5DB" }}>★</span>
+                  <Star key={idx} size={12} className={idx < rating ? "fill-amber-400 text-amber-400" : "text-slate-200"} />
                 ))}
               </div>
             )}
             
             {text && (
-              <p style={{ fontSize: "14px", color: "#1F2937", margin: 0, whiteSpace: "pre-wrap", lineHeight: "1.5" }}>
+              <p className="text-sm whitespace-pre-wrap leading-relaxed">
                 {text}
               </p>
             )}
             
             {imageUrl && (
-              <div style={{ marginTop: text ? "12px" : 0 }}>
+              <div className={text ? "mt-3" : ""}>
                 <img 
                   src={imageUrl} 
                   alt="Gửi kèm" 
-                  style={{
-                    borderRadius: "8px",
-                    maxWidth: "100%",
-                    maxHeight: "200px",
-                    objectFit: "cover",
-                    border: "1px solid rgba(0,0,0,0.1)",
-                    display: "block"
-                  }} 
+                  className="rounded-lg max-w-full max-h-[200px] object-cover border border-black/5"
                 />
               </div>
             )}

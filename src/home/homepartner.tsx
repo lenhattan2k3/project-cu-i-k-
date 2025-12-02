@@ -1,6 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import type { CSSProperties } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation, Routes, Route, Navigate } from "react-router-dom";
 import { signOut } from "firebase/auth";
 import { auth } from "../firebase/config";
 import {
@@ -28,6 +28,7 @@ import PartnerProfile from "./partner/PartnerProfile";
 import PartnerNotification from "./partner/PartnerNotification";
 import PartnerPayment from "./partner/PartnerPayment";
 import PartnerPromotion from "./partner/PartnerPromotion";
+import { useRoleGuard } from "../hooks/useRoleGuard";
 
 // --- GLOBAL CONSTANTS AND STYLES ---
 
@@ -184,21 +185,24 @@ function Dashboard({ onNavigate }: DashboardProps) {
       title: "Tạo chuyến nhanh",
       description: "Nhập thông tin sơ bộ để chuyển sang trình quản lý chuyến",
       fields: ["Tên chuyến", "Ngày khởi hành"],
-      target: "Manage Trips",
+      target: "manage-trips",
+      cta: "quản lý chuyến",
       icon: <FaRoute color={COLORS.blue} />,
     },
     {
       title: "Khuyến mãi mới",
       description: "Cài đặt mã giảm, thời gian áp dụng và điều hướng sang trang ưu đãi",
       fields: ["Tên chiến dịch", "Phần trăm giảm"],
-      target: "Promotions",
+      target: "promotions",
+      cta: "trang khuyến mãi",
       icon: <FaGift color={COLORS.purple} />,
     },
     {
       title: "Gửi thông báo",
       description: "Soạn nội dung nhanh cho hành khách rồi hoàn tất trong mục thông báo",
       fields: ["Tiêu đề", "Thời gian gửi"],
-      target: "Notifications",
+      target: "notifications",
+      cta: "mục thông báo",
       icon: <FaBullhorn color={COLORS.cyan} />,
     },
   ];
@@ -228,7 +232,7 @@ function Dashboard({ onNavigate }: DashboardProps) {
           <div style={dashboardStyles.heroButtons}>
             <button
               style={dashboardStyles.primaryBtn as CSSProperties}
-              onClick={() => onNavigate("Manage Trips")}
+              onClick={() => onNavigate("manage-trips")}
               onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#059669")}
               onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = COLORS.secondary)}
             >
@@ -236,7 +240,7 @@ function Dashboard({ onNavigate }: DashboardProps) {
             </button>
             <button
               style={dashboardStyles.ghostBtn as CSSProperties}
-              onClick={() => onNavigate("Manage Tickets")}
+              onClick={() => onNavigate("manage-tickets")}
               onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "rgba(255,255,255,0.1)")}
               onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
             >
@@ -330,7 +334,7 @@ function Dashboard({ onNavigate }: DashboardProps) {
               onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = COLORS.primaryDark)}
               onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = COLORS.primary)}
             >
-              Đi tới {card.target}
+              Đi tới {card.cta}
             </button>
           </div>
         ))}
@@ -343,16 +347,10 @@ function Dashboard({ onNavigate }: DashboardProps) {
 
 export default function HomePartner() {
   const navigate = useNavigate();
-  const [active, setActive] = useState("Dashboard");
+  const location = useLocation();
+  const basePath = "/homepartner";
   const [hoveredMenuItem, setHoveredMenuItem] = useState<string | null>(null);
-  const [user, setUser] = useState<any>(null);
-
-  useEffect(() => {
-    const storedUser = localStorage.getItem("user");
-    if (storedUser) {
-      setUser(JSON.parse(storedUser));
-    }
-  }, []);
+  const user = useRoleGuard("partner");
 
   const doSignOut = async () => {
     try {
@@ -365,43 +363,33 @@ export default function HomePartner() {
   };
 
   const menu = [
-    { name: "Dashboard", label: "Tổng quan", icon: <FaChartBar /> },
-    { name: "Manage Trips", label: "Quản lý chuyến", icon: <FaBus /> },
-    { name: "Manage Tickets", label: "Quản lý vé", icon: <FaTicketAlt /> },
-    { name: "Reports", label: "Báo cáo", icon: <FaChartBar /> },
-    { name: "Reviews", label: "Đánh giá", icon: <FaStar /> },
-    { name: "Promotions", label: "Khuyến mãi", icon: <FaTags /> },
+    { name: "dashboard", label: "Tổng quan", icon: <FaChartBar /> },
+    { name: "manage-trips", label: "Quản lý chuyến", icon: <FaBus /> },
+    { name: "manage-tickets", label: "Quản lý vé", icon: <FaTicketAlt /> },
+    { name: "reports", label: "Báo cáo", icon: <FaChartBar /> },
+    { name: "reviews", label: "Đánh giá", icon: <FaStar /> },
+    { name: "promotions", label: "Khuyến mãi", icon: <FaTags /> },
   ];
 
   const bottomMenu = [
-    { name: "Payments", label: "Thanh toán", icon: <FaMoneyBillWave /> },
-    { name: "Notifications", label: "Thông báo", icon: <FaBell /> },
-    { name: "Profile", label: "Hồ sơ", icon: <FaUserCircle /> },
+    { name: "payments", label: "Thanh toán", icon: <FaMoneyBillWave /> },
+    { name: "notifications", label: "Thông báo", icon: <FaBell /> },
+    { name: "profile", label: "Hồ sơ", icon: <FaUserCircle /> },
   ];
 
-  const renderContent = () => {
-    switch (active) {
-      case "Dashboard":
-        return <Dashboard onNavigate={setActive} />;
-      case "Manage Trips":
-        return <PartnerTrip />;
-      case "Manage Tickets":
-        return <PartnerTicket />;
-      case "Reports":
-        return <PartnerReport />;
-      case "Reviews":
-        return <PartnerReview />;
-      case "Promotions":
-        return <PartnerPromotion />;
-      case "Payments":
-        return <PartnerPayment />;
-      case "Notifications":
-        return <PartnerNotification />;
-      case "Profile":
-        return <PartnerProfile />;
-      default:
-        return <Dashboard onNavigate={setActive} />;
+  const buildPath = (segment?: string) => (segment ? `${basePath}/${segment}` : basePath);
+
+  const handleNavigate = (segment: string) => {
+    const target = segment === "dashboard" ? buildPath("dashboard") : buildPath(segment);
+    navigate(target);
+  };
+
+  const isActive = (segment: string) => {
+    const current = location.pathname;
+    if (segment === "dashboard") {
+      return current === basePath || current === buildPath("dashboard");
     }
+    return current.startsWith(buildPath(segment));
   };
 
   // Hàm tạo kiểu dáng cho Sidebar Item (Đã xử lý hover bằng state)
@@ -523,8 +511,8 @@ export default function HomePartner() {
           {menu.map((item) => (
             <div
               key={item.name}
-              style={sidebarItemStyle(item.name, active === item.name)}
-              onClick={() => setActive(item.name)}
+              style={sidebarItemStyle(item.name, isActive(item.name))}
+              onClick={() => handleNavigate(item.name)}
               onMouseEnter={() => setHoveredMenuItem(item.name)}
               onMouseLeave={() => setHoveredMenuItem(null)}
             >
@@ -538,8 +526,8 @@ export default function HomePartner() {
           {bottomMenu.map((item) => (
             <div
               key={item.name}
-              style={sidebarItemStyle(item.name, active === item.name)}
-              onClick={() => setActive(item.name)}
+              style={sidebarItemStyle(item.name, isActive(item.name))}
+              onClick={() => handleNavigate(item.name)}
               onMouseEnter={() => setHoveredMenuItem(item.name)}
               onMouseLeave={() => setHoveredMenuItem(null)}
             >
@@ -571,7 +559,19 @@ export default function HomePartner() {
           marginLeft: 240, // Đẩy nội dung sang phải bằng chiều rộng sidebar
         }}
       >
-        {renderContent()}
+        <Routes>
+          <Route index element={<Navigate to="dashboard" replace />} />
+          <Route path="dashboard" element={<Dashboard onNavigate={handleNavigate} />} />
+          <Route path="manage-trips" element={<PartnerTrip />} />
+          <Route path="manage-tickets" element={<PartnerTicket />} />
+          <Route path="reports" element={<PartnerReport />} />
+          <Route path="reviews" element={<PartnerReview />} />
+          <Route path="promotions" element={<PartnerPromotion />} />
+          <Route path="payments" element={<PartnerPayment />} />
+          <Route path="notifications" element={<PartnerNotification />} />
+          <Route path="profile" element={<PartnerProfile />} />
+          <Route path="*" element={<Navigate to="dashboard" replace />} />
+        </Routes>
       </main>
     </div>
   );

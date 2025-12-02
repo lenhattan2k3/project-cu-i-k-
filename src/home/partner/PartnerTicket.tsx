@@ -1,11 +1,35 @@
   // PartnerTicket.tsx
-  import React, { useEffect, useMemo, useState } from "react";
-  import axios from "axios";
-  import { getAuth, onAuthStateChanged } from "firebase/auth";
-  import { getAllTrips } from "../../api/tripApi";
-  import { bookTicket, cancelBooking, getBookedSeats, getBookingsByPartnerId, getMarkedSeats, saveMarkedSeats, updateBooking, updateBookingStatus } from "../../api/bookingApi";
-
-  interface Trip {
+import React, { useEffect, useMemo, useState } from "react";
+import axios from "axios";
+import { getAuth, onAuthStateChanged } from "firebase/auth";
+import { getAllTrips } from "../../api/tripApi";
+import { bookTicket, cancelBooking, getBookedSeats, getBookingsByPartnerId, getMarkedSeats, saveMarkedSeats, updateBooking, updateBookingStatus } from "../../api/bookingApi";
+import { getPaymentStatus } from "../../api/payment-methodApi";
+import { 
+  LayoutDashboard, 
+  Ticket, 
+  DollarSign, 
+  CheckCircle2, 
+  Users, 
+  Search, 
+  Filter, 
+  Download, 
+  RefreshCw, 
+  Armchair, 
+  Edit3, 
+  Trash2, 
+  Eye, 
+  CreditCard, 
+  Calendar, 
+  MapPin, 
+  Phone, 
+  User,
+  Save,
+  X,
+  AlertCircle,
+  Clock
+} from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";  interface Trip {
     _id: string;
     tenChuyen: string;
     tu: string;
@@ -16,6 +40,7 @@
     soGhe: number;
     hinhAnh?: string;
     bookedSeats?: string[]; // có thể lưu ở trip luôn
+    partnerId?: string;
   }
 
   interface Booking {
@@ -27,7 +52,74 @@
     status: string;
     tripId: Trip | { _id: string; tenChuyen?: string; soGhe?: number; giaVe?: number };
     userId?: string; // userId có thể không có trong response nhưng cần khi update
+    partnerId?: string;
+    paymentMethod?: string;
+    paymentStatus?: string;
+    paymentUpdatedAt?: string;
+    paymentReason?: string;
+    createdAt?: string;
+    updatedAt?: string;
   }
+
+  type PaymentMethodKey = "card" | "bank" | "cash" | "payos" | "unknown";
+  type PaymentStatusKey = "pending" | "paid" | "completed" | "cancelled" | "refunded" | "failed" | "unknown";
+
+  const paymentMethodMeta: Record<PaymentMethodKey, { label: string; bg: string; color: string; icon: React.ReactNode }> = {
+    card: { label: "Thẻ / Ví", bg: "bg-sky-100", color: "text-sky-700", icon: <CreditCard size={14} /> },
+    bank: { label: "Chuyển khoản", bg: "bg-violet-100", color: "text-violet-700", icon: <DollarSign size={14} /> },
+    cash: { label: "Tiền mặt", bg: "bg-amber-100", color: "text-amber-700", icon: <DollarSign size={14} /> },
+    payos: { label: "PayOS", bg: "bg-lime-100", color: "text-lime-700", icon: <CreditCard size={14} /> },
+    unknown: { label: "Chưa xác định", bg: "bg-gray-100", color: "text-gray-600", icon: <AlertCircle size={14} /> },
+  };
+
+  const paymentStatusMeta: Record<PaymentStatusKey, { label: string; bg: string; color: string; icon: React.ReactNode }> = {
+    pending: { label: "Đang chờ", bg: "bg-orange-50", color: "text-orange-600", icon: <Clock size={14} /> },
+    paid: { label: "Đã thanh toán", bg: "bg-emerald-50", color: "text-emerald-600", icon: <CheckCircle2 size={14} /> },
+    completed: { label: "Hoàn tất", bg: "bg-blue-50", color: "text-blue-600", icon: <CheckCircle2 size={14} /> },
+    cancelled: { label: "Đã hủy", bg: "bg-red-50", color: "text-red-600", icon: <X size={14} /> },
+    refunded: { label: "Đã hoàn tiền", bg: "bg-yellow-50", color: "text-yellow-600", icon: <RefreshCw size={14} /> },
+    failed: { label: "Thất bại", bg: "bg-red-50", color: "text-red-600", icon: <AlertCircle size={14} /> },
+    unknown: { label: "Không rõ", bg: "bg-gray-50", color: "text-gray-600", icon: <AlertCircle size={14} /> },
+  };
+
+  const normalizePaymentMethod = (method?: string): PaymentMethodKey => {
+    const key = (method || "").toLowerCase();
+    if (key === "card" || key === "bank" || key === "cash" || key === "payos") return key;
+    return "unknown";
+  };
+
+  const normalizePaymentStatus = (status?: string): PaymentStatusKey => {
+    const key = (status || "pending").toLowerCase();
+    if (key === "done") return "completed";
+    if (key === "success") return "paid";
+    if (key === "unpaid") return "pending";
+    if (key === "failed") return "failed";
+    if (key === "paid" || key === "completed" || key === "pending" || key === "cancelled" || key === "refunded") {
+      return key as PaymentStatusKey;
+    }
+    return "unknown";
+  };
+
+  const getPaymentMethodDisplay = (method?: string) => paymentMethodMeta[normalizePaymentMethod(method)];
+  const getPaymentStatusDisplay = (status?: string) => paymentStatusMeta[normalizePaymentStatus(status)];
+
+  const formatDateTime = (value?: string | number | Date) => {
+    if (!value) return "";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "";
+    return date.toLocaleString("vi-VN", { hour12: false });
+  };
+
+  const formatRelativeTime = (value?: string | number | Date) => {
+    if (!value) return "";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "";
+    const diff = Date.now() - date.getTime();
+    if (diff < 60000) return "vừa xong";
+    if (diff < 3600000) return `${Math.floor(diff / 60000)} phút trước`;
+    if (diff < 86400000) return `${Math.floor(diff / 3600000)} giờ trước`;
+    return date.toLocaleDateString("vi-VN", { hour12: false });
+  };
 
   export default function PartnerTicket() {
     // dữ liệu chính
@@ -44,6 +136,7 @@
     const [tripSelectedSeats, setTripSelectedSeats] = useState<string[]>([]); // ghế partner muốn set/add
     const [tripBookingsOfSelected, setTripBookingsOfSelected] = useState<Booking[]>([]); // bookings thuộc trip selected (dùng để hiển thị thông tin)
     const [seatActionLoading, setSeatActionLoading] = useState(false);
+    const [tripFilter, setTripFilter] = useState<string>("all");
 
     // modal chỉnh booking (như cart example)
     const [editBooking, setEditBooking] = useState<Booking | null>(null);
@@ -94,6 +187,16 @@
       return [];
     };
 
+    const getTripFromBooking = (booking: Booking): Trip | null => {
+      if (!booking || !booking.tripId) return null;
+      if (typeof booking.tripId === "object" && "_id" in booking.tripId) {
+        return booking.tripId as Trip;
+      }
+      const tripId = typeof booking.tripId === "string" ? booking.tripId : (booking.tripId as any)?._id;
+      if (!tripId) return null;
+      return trips.find((t) => t._id === tripId) || null;
+    };
+
 
     // reload data mỗi khi partner đăng nhập/log out
     useEffect(() => {
@@ -120,55 +223,20 @@
       [bookings]
     );
 
-    const paidCount = useMemo(() => visibleBookings.filter((b) => b.status === "paid").length, [visibleBookings]);
-    const unpaidCount = useMemo(() => visibleBookings.filter((b) => b.status !== "paid").length, [visibleBookings]);
-    const totalRevenue = useMemo(
-      () => visibleBookings.reduce((sum, b) => sum + (b.totalPrice || 0), 0),
-      [visibleBookings]
-    );
-    const occupiedSeats = useMemo(
-      () => visibleBookings.reduce((sum, b) => sum + ((Array.isArray(b.soGhe) ? b.soGhe.length : 0)), 0),
-      [visibleBookings]
-    );
-    const totalSeats = useMemo(() => trips.reduce((sum, trip) => sum + (trip.soGhe || 0), 0), [trips]);
-    const occupancyRate = totalSeats > 0 ? Math.min(100, Math.round((occupiedSeats / totalSeats) * 100)) : 0;
-    const paymentRate = visibleBookings.length > 0 ? Math.round((paidCount / visibleBookings.length) * 100) : 0;
+    const filteredBookings = useMemo(() => {
+      if (tripFilter === "all") return visibleBookings;
+      return visibleBookings.filter((b) => {
+        const id = typeof b.tripId === "object" ? (b.tripId as Trip)?._id : (b.tripId as any);
+        return String(id) === tripFilter;
+      });
+    }, [visibleBookings, tripFilter]);
 
-    const upcomingTrips = useMemo(() => {
-      return [...trips]
-        .sort((a, b) => new Date(a.ngayKhoiHanh || 0).getTime() - new Date(b.ngayKhoiHanh || 0).getTime())
-        .slice(0, 4);
-    }, [trips]);
+    const selectedTripForFilter = useMemo(() => {
+      if (tripFilter === "all") return null;
+      return trips.find((t) => t._id === tripFilter) || null;
+    }, [tripFilter, trips]);
 
-    const heroMetrics = useMemo(
-      () => [
-        {
-          label: "Tổng vé",
-          value: visibleBookings.length,
-          hint: "Vé đang quản lý",
-          accent: "#60a5fa",
-        },
-        {
-          label: "Doanh thu",
-          value: `${(totalRevenue || 0).toLocaleString()}₫`,
-          hint: "Đã ghi nhận",
-          accent: "#fbbf24",
-        },
-        {
-          label: "Đã thanh toán",
-          value: paidCount,
-          hint: `${unpaidCount} vé chờ xác nhận`,
-          accent: "#34d399",
-        },
-        {
-          label: "Tỉ lệ lấp đầy",
-          value: `${occupancyRate}%`,
-          hint: `${occupiedSeats} ghế / ${totalSeats || 0}`,
-          accent: "#a78bfa",
-        },
-      ],
-      [visibleBookings.length, totalRevenue, paidCount, unpaidCount, occupancyRate, occupiedSeats, totalSeats]
-    );
+
 
     const currentTimestamp = useMemo(() => new Date().toLocaleString("vi-VN", { hour12: false }), []);
 
@@ -325,6 +393,102 @@
       setSeatActionLoading(false);
     }
   };
+
+    const enrichBookingsWithPaymentData = async (source: Booking[]): Promise<Booking[]> => {
+      if (!source.length) {
+        return source;
+      }
+
+      const results = await Promise.allSettled(
+        source.map(async (booking) => {
+          try {
+            const payment = await getPaymentStatus(booking._id);
+            return {
+              ...booking,
+              paymentMethod: payment?.paymentMethod || booking.paymentMethod || "unknown",
+              paymentStatus: payment?.status || normalizePaymentStatus(booking.status),
+              paymentUpdatedAt: payment?.updatedAt || booking.updatedAt,
+              paymentReason: payment?.reason || booking.paymentReason,
+            };
+          } catch (error) {
+            console.warn("⚠️ Không lấy được payment status cho booking", booking._id, error);
+            return {
+              ...booking,
+              paymentMethod: booking.paymentMethod || "unknown",
+              paymentStatus: booking.paymentStatus || normalizePaymentStatus(booking.status),
+            };
+          }
+        })
+      );
+
+      return results.map((result, index) => (result.status === "fulfilled" ? result.value : source[index]));
+    };
+
+    const handleExportTripData = () => {
+      if (!filteredBookings.length) {
+        alert("⚠️ Không có vé nào để xuất theo bộ lọc hiện tại.");
+        return;
+      }
+
+      const csvEscape = (value: unknown) => {
+        const str = value === null || value === undefined ? "" : String(value);
+        return `"${str.replace(/"/g, '""')}"`;
+      };
+
+      const header = [
+        "Mã vé",
+        "Tên khách",
+        "Số điện thoại",
+        "Trạng thái",
+        "Ghế",
+        "Giá trị vé",
+        "Tên chuyến",
+        "Tuyến",
+        "Ngày khởi hành",
+        "Giờ khởi hành",
+        "Phương thức thanh toán",
+        "Trạng thái thanh toán",
+        "Thanh toán cập nhật lúc",
+      ];
+
+      const rows = filteredBookings.map((booking) => {
+        const trip = getTripFromBooking(booking);
+        const route = trip ? `${trip.tu} → ${trip.den}` : "";
+        const methodDisplay = getPaymentMethodDisplay(booking.paymentMethod);
+        const statusDisplay = getPaymentStatusDisplay(booking.paymentStatus);
+        return [
+          booking._id,
+          booking.hoTen,
+          booking.sdt,
+          booking.status,
+          (booking.soGhe || []).join(", "),
+          (booking.totalPrice || 0).toLocaleString("vi-VN"),
+          trip?.tenChuyen || "N/A",
+          route,
+          trip?.ngayKhoiHanh || "",
+          trip?.gioKhoiHanh || "",
+          methodDisplay.label,
+          statusDisplay.label,
+          formatDateTime(booking.paymentUpdatedAt),
+        ]
+          .map(csvEscape)
+          .join(",");
+      });
+
+      const csvContent = [header.map(csvEscape).join(","), ...rows].join("\n");
+      const blob = new Blob(["\uFEFF" + csvContent], { type: "text/csv;charset=utf-8;" });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      const tripName = selectedTripForFilter
+        ? `${selectedTripForFilter.tenChuyen}-${selectedTripForFilter.tu}-${selectedTripForFilter.den}`
+        : "tat-ca-chuyen";
+      link.href = url;
+      link.download = `ve-${tripName.replace(/\s+/g, "-")}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    };
 
     // Mở modal đặt vé nhanh khi click vào ghế trống
     const openQuickBookModal = (seat: string) => {
@@ -797,8 +961,27 @@
           })(),
         ]);
 
-        setTrips(tripData || []);
-        setBookings(parseBookingsArrayFromRes(bookingRaw));
+        const scopedTrips = Array.isArray(tripData) ? tripData : [];
+        const allowedTripIds = new Set(scopedTrips.map((trip) => String(trip._id)));
+        const normalizedPartnerId = String(targetPartnerId);
+
+        const scopedBookings = parseBookingsArrayFromRes(bookingRaw).filter((booking) => {
+          const bookingPartner = booking.partnerId || (typeof booking.tripId === "object" && (booking.tripId as any)?.partnerId);
+          if (bookingPartner) {
+            return String(bookingPartner) === normalizedPartnerId;
+          }
+
+          const tripRef = typeof booking.tripId === "object"
+            ? (booking.tripId as Trip)?._id
+            : (booking.tripId as any);
+
+          return tripRef ? allowedTripIds.has(String(tripRef)) : false;
+        });
+
+        const bookingsWithPayment = await enrichBookingsWithPaymentData(scopedBookings);
+
+        setTrips(scopedTrips);
+        setBookings(bookingsWithPayment);
       } catch (err) {
         console.error("Lỗi reload data:", err);
         alert("⚠️ Có lỗi khi tải lại dữ liệu. Vui lòng refresh trang.");
@@ -834,808 +1017,663 @@
 
     if (loading) {
       return (
-        <div style={styles.loadingScreen}>
-          <div style={styles.spinner}></div>
-          <p style={styles.loadingText}>Đang tải dữ liệu...</p>
+        <div className="flex flex-col items-center justify-center min-h-screen bg-slate-50">
+          <div className="w-12 h-12 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin"></div>
+          <p className="mt-4 text-blue-600 font-medium">Đang tải dữ liệu...</p>
         </div>
       );
     }
 
     if (authChecked && !partnerId) {
       return (
-        <div style={styles.loadingScreen}>
-          <p style={{ ...styles.loadingText, marginTop: 0 }}>
-            Vui lòng đăng nhập bằng tài khoản nhà xe để xem và quản lý vé của bạn.
-          </p>
+        <div className="flex flex-col items-center justify-center min-h-screen bg-slate-50 p-6">
+          <div className="bg-white p-8 rounded-2xl shadow-lg text-center max-w-md">
+            <div className="w-16 h-16 bg-red-100 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4">
+              <AlertCircle size={32} />
+            </div>
+            <h2 className="text-xl font-bold text-gray-800 mb-2">Chưa đăng nhập</h2>
+            <p className="text-gray-600">
+              Vui lòng đăng nhập bằng tài khoản nhà xe để xem và quản lý vé của bạn.
+            </p>
+          </div>
         </div>
       );
     }
 
     return (
-      <div style={styles.container}>
-        {/* ======================
-              TOP: Seat Manager
-          ====================== */}
-        <div style={{ marginBottom: 20 }}>
-          <div
-            style={{
-              background: "#fff",
-              padding: 16,
-              borderRadius: 12,
-              boxShadow: "0 8px 24px rgba(0,0,0,0.08)",
-              display: "flex",
-              gap: 12,
-              alignItems: "center",
-              flexWrap: "wrap",
-            }}
-          >
-            <div style={{ minWidth: 220 }}>
-              <label style={{ display: "block", fontWeight: 700, marginBottom: 6 }}>🔧 Quản lý ghế (nhanh)</label>
-              <select
-                value={tripForManage?._id || ""}
-                onChange={(e) => handleSelectTripForManage(e.target.value || undefined)}
-                style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid #ccc" }}
-              >
-                <option value="">— Chọn chuyến để quản lý ghế —</option>
-                {trips.map((t) => (
-                  <option key={t._id} value={t._id}>
-                    {t.tenChuyen} ({t.tu} → {t.den})
-                  </option>
-                ))}
-              </select>
+      <motion.div 
+        initial={{ opacity: 0 }} 
+        animate={{ opacity: 1 }} 
+        className="min-h-screen bg-slate-50 p-4 md:p-8 font-sans text-slate-800"
+      >
+        <div className="max-w-7xl mx-auto space-y-8">
+          {/* Header */}
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div>
+              <h1 className="text-3xl font-bold text-slate-900 flex items-center gap-3">
+                <LayoutDashboard className="text-blue-600" />
+                Quản lý vé đối tác
+              </h1>
+              <p className="text-slate-500 mt-1">Theo dõi tình trạng đặt vé & chuyến xe của bạn</p>
+            </div>
+            <div className="flex items-center gap-3 bg-white px-4 py-2 rounded-full shadow-sm border border-slate-200">
+              <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div>
+              <span className="text-sm font-medium text-slate-600">Cập nhật: {currentTimestamp}</span>
+            </div>
+          </div>
+
+
+
+          {/* Seat Manager Section */}
+          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+            <div className="p-6 border-b border-slate-100 bg-slate-50/50 flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-blue-100 text-blue-600 rounded-lg">
+                  <Armchair size={20} />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-slate-900">Quản lý sơ đồ ghế</h2>
+                  <p className="text-sm text-slate-500">Chọn chuyến để xem và quản lý trạng thái ghế</p>
+                </div>
+              </div>
+              
+              <div className="flex items-center gap-3">
+                <select
+                  value={tripForManage?._id || ""}
+                  onChange={(e) => handleSelectTripForManage(e.target.value || undefined)}
+                  className="px-4 py-2 rounded-lg border border-slate-300 bg-white text-slate-700 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none min-w-[250px]"
+                >
+                  <option value="">— Chọn chuyến xe —</option>
+                  {trips.map((t) => (
+                    <option key={t._id} value={t._id}>
+                      {t.tenChuyen} ({t.tu} → {t.den})
+                    </option>
+                  ))}
+                </select>
+                
+                <button
+                  onClick={() => tripForManage && handleSelectTripForManage(tripForManage._id)}
+                  className="p-2 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                  title="Làm mới dữ liệu"
+                >
+                  <RefreshCw size={20} />
+                </button>
+              </div>
             </div>
 
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 13, color: "#555" }}>
-                {tripForManage ? (
-                  <>
-                    <strong>{tripForManage.tenChuyen}</strong> — Tổng ghế: <strong>{tripForManage.soGhe || 20}</strong> — 
-                    Đã đặt: <strong style={{ color: "#ef4444" }}>{tripBookedSeats.length}</strong> — 
-                    Còn trống: <strong style={{ color: "#10b981" }}>{(tripForManage.soGhe || 20) - tripBookedSeats.length}</strong> — 
-                    Số vé: {tripBookingsOfSelected.length}
-                  </>
-                ) : (
-                  <>Chọn chuyến phía trái để xem sơ đồ ghế (dữ liệu lấy từ các booking của chuyến).</>
+            <div className="p-6">
+              {tripForManage ? (
+                <div className="flex flex-col lg:flex-row gap-8">
+                  {/* Seat Map */}
+                  <div className="flex-1">
+                    <div className="bg-slate-100 p-6 rounded-xl border border-slate-200">
+                      <div className="mb-6 flex justify-center">
+                        <div className="w-3/4 h-2 bg-slate-300 rounded-full opacity-50"></div>
+                      </div>
+                      
+                      <div className="grid grid-cols-5 gap-3 max-w-md mx-auto">
+                        {Array.from({ length: tripForManage.soGhe || 20 }, (_, i) => (i + 1).toString()).map((seat) => {
+                          const bookedSeatsFromBookings = tripBookingsOfSelected
+                            .filter((b) => !(b.hoTen === "_MARKED_SEATS_" && b.sdt === "_PARTNER_MARKED_"))
+                            .flatMap((b) => (Array.isArray(b.soGhe) ? b.soGhe.map(String) : []));
+                          
+                          const markedSeatsBooked = tripBookingsOfSelected
+                            .filter((b) => b.hoTen === "_MARKED_SEATS_" && b.sdt === "_PARTNER_MARKED_")
+                            .flatMap((b) => (Array.isArray(b.soGhe) ? b.soGhe.map(String) : []));
+                          
+                          const isBookedByRealBooking = bookedSeatsFromBookings.includes(seat);
+                          const isMarkedSeatSaved = markedSeatsBooked.includes(seat);
+                          const isSelectedButNotSaved = tripSelectedSeats.includes(seat) && !isMarkedSeatSaved;
+                          const isBooked = isBookedByRealBooking || isMarkedSeatSaved;
+                          
+                          let seatColorClass = "bg-emerald-500 hover:bg-emerald-600 text-white"; // Trống
+                          if (isBookedByRealBooking) seatColorClass = "bg-slate-400 cursor-not-allowed text-white"; // Đã đặt thật
+                          else if (isMarkedSeatSaved) seatColorClass = "bg-slate-500 hover:bg-slate-600 text-white"; // Đã đánh dấu
+                          else if (isSelectedButNotSaved) seatColorClass = "bg-amber-500 hover:bg-amber-600 text-white"; // Đang chọn
+
+                          return (
+                            <motion.button
+                              whileHover={!isBookedByRealBooking ? { scale: 1.05 } : {}}
+                              whileTap={!isBookedByRealBooking ? { scale: 0.95 } : {}}
+                              key={seat}
+                              onClick={() => toggleTripSeat(seat)}
+                              onDoubleClick={() => toggleTripSeat(seat, true)}
+                              disabled={isBookedByRealBooking && !isSelectedButNotSaved}
+                              className={`
+                                relative h-12 rounded-lg font-bold text-sm shadow-sm transition-colors flex flex-col items-center justify-center
+                                ${seatColorClass}
+                              `}
+                              title={
+                                isBookedByRealBooking ? "Đã đặt (Khóa)" : 
+                                isMarkedSeatSaved ? "Đã đánh dấu (Click để bỏ)" : 
+                                isSelectedButNotSaved ? "Đang chọn (Click để bỏ)" : 
+                                "Trống (Click chọn, Double-click đặt nhanh)"
+                              }
+                            >
+                              <span>{seat}</span>
+                              {isBookedByRealBooking && <span className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full border-2 border-white"></span>}
+                            </motion.button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                    
+                    <div className="mt-4 flex flex-wrap justify-center gap-4 text-sm text-slate-600">
+                      <div className="flex items-center gap-2"><span className="w-3 h-3 rounded-full bg-slate-400"></span> Đã đặt</div>
+                      <div className="flex items-center gap-2"><span className="w-3 h-3 rounded-full bg-emerald-500"></span> Còn trống</div>
+                      <div className="flex items-center gap-2"><span className="w-3 h-3 rounded-full bg-amber-500"></span> Đang chọn</div>
+                      <div className="flex items-center gap-2"><span className="w-3 h-3 rounded-full bg-slate-500"></span> Đã đánh dấu</div>
+                    </div>
+                  </div>
+
+                  {/* Actions Panel */}
+                  <div className="w-full lg:w-80 space-y-6">
+                    <div className="bg-slate-50 p-5 rounded-xl border border-slate-200">
+                      <h3 className="font-semibold text-slate-800 mb-4 flex items-center gap-2">
+                        <Ticket size={18} className="text-blue-600" />
+                        Thông tin chuyến
+                      </h3>
+                      <div className="space-y-3 text-sm">
+                        <div className="flex justify-between">
+                          <span className="text-slate-500">Chuyến:</span>
+                          <span className="font-medium">{tripForManage.tenChuyen}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-500">Tổng ghế:</span>
+                          <span className="font-medium">{tripForManage.soGhe || 20}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-500">Đã đặt:</span>
+                          <span className="font-medium text-red-600">{tripBookedSeats.length}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-500">Còn trống:</span>
+                          <span className="font-medium text-emerald-600">{(tripForManage.soGhe || 20) - tripBookedSeats.length}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="space-y-3">
+                      <button
+                        onClick={() => {
+                          if (tripForManage && tripSelectedSeats.length > 0 && tripSelectedSeats.length === 1) {
+                            const bookedSeatsFromBookings = tripBookingsOfSelected
+                              .filter((b) => !(b.hoTen === "_MARKED_SEATS_" && b.sdt === "_PARTNER_MARKED_"))
+                              .flatMap((b) => (Array.isArray(b.soGhe) ? b.soGhe.map(String) : []));
+                            const markedSeatsBooked = tripBookingsOfSelected
+                              .filter((b) => b.hoTen === "_MARKED_SEATS_" && b.sdt === "_PARTNER_MARKED_")
+                              .flatMap((b) => (Array.isArray(b.soGhe) ? b.soGhe.map(String) : []));
+                            const selectedSeat = tripSelectedSeats[0];
+                            const isBooked = bookedSeatsFromBookings.includes(selectedSeat) || markedSeatsBooked.includes(selectedSeat);
+                            
+                            if (isBooked) {
+                              alert("⚠️ Ghế này đã được đặt! Vui lòng chọn ghế trống khác.");
+                              return;
+                            }
+                            openQuickBookModal(selectedSeat);
+                          } else if (tripSelectedSeats.length === 0) {
+                            alert("⚠️ Vui lòng chọn ghế trước khi đặt vé nhanh!");
+                          } else {
+                            alert("⚠️ Chỉ có thể đặt vé nhanh cho 1 ghế tại một thời điểm!");
+                          }
+                        }}
+                        disabled={!tripForManage || seatActionLoading || tripSelectedSeats.length === 0}
+                        className={`w-full py-3 px-4 rounded-xl font-semibold shadow-sm flex items-center justify-center gap-2 transition-all
+                          ${!tripForManage || tripSelectedSeats.length === 0 
+                            ? "bg-slate-100 text-slate-400 cursor-not-allowed" 
+                            : "bg-blue-600 hover:bg-blue-700 text-white hover:shadow-md"}`}
+                      >
+                        <Ticket size={18} />
+                        Đặt vé nhanh
+                      </button>
+
+                      <button
+                        onClick={handleSaveTripSeats}
+                        disabled={!tripForManage || seatActionLoading}
+                        className={`w-full py-3 px-4 rounded-xl font-semibold shadow-sm flex items-center justify-center gap-2 transition-all
+                          ${!tripForManage 
+                            ? "bg-slate-100 text-slate-400 cursor-not-allowed" 
+                            : "bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 hover:border-slate-400"}`}
+                      >
+                        {seatActionLoading ? <RefreshCw className="animate-spin" size={18} /> : <Save size={18} />}
+                        {seatActionLoading ? "Đang lưu..." : "Lưu đánh dấu ghế"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-center py-12 text-slate-400">
+                  <Armchair size={48} className="mx-auto mb-4 opacity-20" />
+                  <p>Vui lòng chọn chuyến xe để xem sơ đồ ghế</p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Main Table Section */}
+          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+            {/* Filter Bar */}
+            <div className="p-6 border-b border-slate-100 flex flex-col md:flex-row justify-between items-center gap-4">
+              <div className="flex items-center gap-4 w-full md:w-auto">
+                <div className="relative flex-1 md:w-64">
+                  <Filter className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                  <select
+                    value={tripFilter}
+                    onChange={(e) => setTripFilter(e.target.value)}
+                    className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-slate-700 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none appearance-none"
+                  >
+                    <option value="all">Tất cả chuyến xe</option>
+                    {trips.map((trip) => (
+                      <option key={trip._id} value={trip._id}>
+                        {trip.tenChuyen} ({trip.tu} → {trip.den})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                {tripFilter !== "all" && (
+                  <button 
+                    onClick={() => setTripFilter("all")}
+                    className="text-sm text-blue-600 hover:text-blue-800 font-medium"
+                  >
+                    Xóa lọc
+                  </button>
                 )}
               </div>
+
+              <button
+                onClick={handleExportTripData}
+                disabled={!filteredBookings.length}
+                className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-medium transition-colors
+                  ${!filteredBookings.length 
+                    ? "bg-slate-100 text-slate-400 cursor-not-allowed" 
+                    : "bg-emerald-50 text-emerald-600 hover:bg-emerald-100"}`}
+              >
+                <Download size={18} />
+                Xuất Excel
+              </button>
             </div>
 
-            <div style={{ display: "flex", gap: 8 }}>
-              <button
-                onClick={() => {
-                  if (tripForManage) handleSelectTripForManage(tripForManage._id);
-                }}
-                style={{ padding: "8px 12px", borderRadius: 8, background: "#f3f4f6", border: "1px solid #e5e7eb" }}
-              >
-                🔄 Làm mới
-              </button>
-
-              <button
-                onClick={() => {
-                  if (tripForManage && tripSelectedSeats.length > 0 && tripSelectedSeats.length === 1) {
-                    // Kiểm tra ghế có trống không (chưa được đặt)
-                    const bookedSeatsFromBookings = tripBookingsOfSelected
-                      .filter((b) => !(b.hoTen === "_MARKED_SEATS_" && b.sdt === "_PARTNER_MARKED_"))
-                      .flatMap((b) => (Array.isArray(b.soGhe) ? b.soGhe.map(String) : []));
-                    
-                    const markedSeatsBooked = tripBookingsOfSelected
-                      .filter((b) => b.hoTen === "_MARKED_SEATS_" && b.sdt === "_PARTNER_MARKED_")
-                      .flatMap((b) => (Array.isArray(b.soGhe) ? b.soGhe.map(String) : []));
-                    
-                    const selectedSeat = tripSelectedSeats[0];
-                    const isBooked = bookedSeatsFromBookings.includes(selectedSeat) || markedSeatsBooked.includes(selectedSeat);
-                    
-                    if (isBooked) {
-                      alert("⚠️ Ghế này đã được đặt! Vui lòng chọn ghế trống khác.");
-                      return;
-                    }
-                    
-                    // Mở modal đặt vé nhanh cho ghế đó
-                    openQuickBookModal(selectedSeat);
-                  } else if (tripSelectedSeats.length === 0) {
-                    alert("⚠️ Vui lòng chọn ghế trước khi đặt vé nhanh!");
-                  } else {
-                    alert("⚠️ Chỉ có thể đặt vé nhanh cho 1 ghế tại một thời điểm!");
-                  }
-                }}
-                disabled={!tripForManage || seatActionLoading || tripSelectedSeats.length === 0}
-                style={{
-                  padding: "8px 14px",
-                  borderRadius: 8,
-                  background: !tripForManage || tripSelectedSeats.length === 0 ? "#c7d2fe" : "#10b981",
-                  color: "#fff",
-                  border: "none",
-                  cursor: !tripForManage || tripSelectedSeats.length === 0 ? "not-allowed" : "pointer",
-                }}
-                title={tripSelectedSeats.length > 0 ? `Đặt vé nhanh cho ghế ${tripSelectedSeats.join(", ")}` : "Chọn ghế trước"}
-              >
-                🎫 Đặt vé nhanh
-              </button>
-
-              <button
-                onClick={handleSaveTripSeats}
-                disabled={!tripForManage || seatActionLoading}
-                style={{
-                  padding: "8px 14px",
-                  borderRadius: 8,
-                  background: !tripForManage ? "#c7d2fe" : "#4f46e5",
-                  color: "#fff",
-                  border: "none",
-                  cursor: !tripForManage ? "not-allowed" : "pointer",
-                }}
-              >
-                {seatActionLoading ? "Đang lưu..." : "💾 Lưu đánh dấu ghế"}
-              </button>
+            {/* Table */}
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-200 text-left">
+                    <th className="py-4 px-6 font-semibold text-slate-600 text-sm">Khách hàng</th>
+                    <th className="py-4 px-6 font-semibold text-slate-600 text-sm">Liên hệ</th>
+                    <th className="py-4 px-6 font-semibold text-slate-600 text-sm">Ghế</th>
+                    <th className="py-4 px-6 font-semibold text-slate-600 text-sm">Tổng tiền</th>
+                    <th className="py-4 px-6 font-semibold text-slate-600 text-sm">Thanh toán</th>
+                    <th className="py-4 px-6 font-semibold text-slate-600 text-sm">Trạng thái</th>
+                    <th className="py-4 px-6 font-semibold text-slate-600 text-sm text-right">Thao tác</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {filteredBookings.length > 0 ? (
+                    filteredBookings.map((b) => {
+                      const method = getPaymentMethodDisplay(b.paymentMethod);
+                      const status = getPaymentStatusDisplay(b.paymentStatus);
+                      return (
+                        <tr key={b._id} className="hover:bg-slate-50/80 transition-colors group">
+                          <td className="py-4 px-6">
+                            <div className="font-medium text-slate-900">{b.hoTen}</div>
+                            <div className="text-xs text-slate-400 mt-0.5">ID: {b._id.slice(-6)}</div>
+                          </td>
+                          <td className="py-4 px-6 text-slate-600">{b.sdt}</td>
+                          <td className="py-4 px-6">
+                            <div className="flex flex-wrap gap-1">
+                              {(b.soGhe || []).map(seat => (
+                                <span key={seat} className="px-2 py-0.5 bg-blue-50 text-blue-600 rounded text-xs font-medium">
+                                  {seat}
+                                </span>
+                              ))}
+                            </div>
+                          </td>
+                          <td className="py-4 px-6 font-medium text-slate-900">
+                            {(b.totalPrice || 0).toLocaleString()}₫
+                          </td>
+                          <td className="py-4 px-6">
+                            <div className="flex flex-col gap-1.5">
+                              <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium w-fit ${method.bg} ${method.color}`}>
+                                {method.icon} {method.label}
+                              </span>
+                              <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium w-fit ${status.bg} ${status.color}`}>
+                                {status.icon} {status.label}
+                              </span>
+                            </div>
+                          </td>
+                          <td className="py-4 px-6">
+                            <button
+                              onClick={() => handleTogglePaymentStatus(b)}
+                              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors
+                                ${b.status === "paid" 
+                                  ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-200" 
+                                  : "bg-orange-100 text-orange-700 hover:bg-orange-200"}`}
+                            >
+                              {b.status === "paid" ? "Đã thanh toán" : "Chưa thanh toán"}
+                            </button>
+                          </td>
+                          <td className="py-4 px-6 text-right">
+                            <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <button 
+                                onClick={() => handleViewBooking(b)}
+                                className="p-2 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                                title="Xem chi tiết"
+                              >
+                                <Eye size={18} />
+                              </button>
+                              <button 
+                                onClick={() => openEditBooking(b)}
+                                className="p-2 text-slate-500 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors"
+                                title="Chỉnh sửa"
+                              >
+                                <Edit3 size={18} />
+                              </button>
+                              <button 
+                                onClick={() => handleDeleteBooking(b._id)}
+                                className="p-2 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                                title="Xóa vé"
+                              >
+                                <Trash2 size={18} />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  ) : (
+                    <tr>
+                      <td colSpan={7} className="py-12 text-center text-slate-400 italic">
+                        <div className="flex flex-col items-center gap-3">
+                          <Search size={40} className="opacity-20" />
+                          <p>Không tìm thấy vé nào phù hợp</p>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
             </div>
           </div>
+        </div>
 
-          {/* Seat map small preview */}
-          {tripForManage && (
-            <div style={{ marginTop: 12, background: "#fff", padding: 12, borderRadius: 10 }}>
-              <div style={{ marginBottom: 8, fontSize: 13, color: "#666", fontWeight: 600, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-                <span>Sơ đồ ghế:</span>
-                <span style={{ fontSize: 11, color: "#6b7280", fontWeight: 500 }}>
-                  Click để đánh dấu • Double-click để đặt vé nhanh
-                </span>
-              </div>
-              <div style={{ display: "grid", gridTemplateColumns: `repeat(5, 1fr)`, gap: 8 }}>
-                {Array.from({ length: tripForManage.soGhe || 20 }, (_, i) => (i + 1).toString()).map((seat) => {
-                  // Lấy ghế từ bookings thực tế (không bao gồm ghế đánh dấu và booking đánh dấu)
-                  const bookedSeatsFromBookings = tripBookingsOfSelected
-                    .filter((b) => !(b.hoTen === "_MARKED_SEATS_" && b.sdt === "_PARTNER_MARKED_")) // Loại trừ booking đánh dấu
-                    .flatMap((b) => (Array.isArray(b.soGhe) ? b.soGhe.map(String) : []));
-                  
-                  // Lấy ghế đã được đánh dấu và lưu (từ booking đặc biệt)
-                  const markedSeatsBooked = tripBookingsOfSelected
-                    .filter((b) => b.hoTen === "_MARKED_SEATS_" && b.sdt === "_PARTNER_MARKED_")
-                    .flatMap((b) => (Array.isArray(b.soGhe) ? b.soGhe.map(String) : []));
-                  
-                  // Ghế đã đặt bởi booking thật (khóa, không thể thay đổi)
-                  const isBookedByRealBooking = bookedSeatsFromBookings.includes(seat);
-                  
-                  // Ghế đã được đánh dấu và lưu (hiển thị như "đã đặt")
-                  const isMarkedSeatSaved = markedSeatsBooked.includes(seat);
-                  
-                  // Ghế đang được chọn để đánh dấu nhưng chưa lưu
-                  const isSelectedButNotSaved = tripSelectedSeats.includes(seat) && !isMarkedSeatSaved;
-                  
-                  // Ưu tiên hiển thị:
-                  // 1. Ghế đã đặt bởi booking thật hoặc đã được đánh dấu (đã lưu): màu xám + "Đã đặt"
-                  // 2. Ghế đang chọn nhưng chưa lưu: màu vàng + "Đang chọn"
-                  // 3. Ghế trống: màu xanh + "Trống"
-                  const isBooked = isBookedByRealBooking || isMarkedSeatSaved;
-                  
-                  return (
-                    <button
-                      key={seat}
-                      onClick={() => toggleTripSeat(seat)}
-                      onDoubleClick={() => toggleTripSeat(seat, true)}
-                      disabled={isBookedByRealBooking && !isSelectedButNotSaved}
-                      style={{
-                        padding: "8px 4px",
-                        borderRadius: 8,
-                        border: "none",
-                        color: "#fff",
-                        background: isBooked ? "#6b7280" : isSelectedButNotSaved ? "#f59e0b" : "#10b981",
-                        cursor: isBookedByRealBooking && !isSelectedButNotSaved ? "not-allowed" : "pointer",
-                        opacity: isBooked ? 0.9 : 1,
-                        fontWeight: 600,
-                        display: "flex",
-                        flexDirection: "column",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        gap: 2,
-                        fontSize: 11,
-                      }}
-                      title={
-                        isBookedByRealBooking
-                          ? `Ghế ${seat} - Đã đặt bởi booking (khóa)`
-                          : isMarkedSeatSaved
-                          ? `Ghế ${seat} - Đã đánh dấu (đã lưu) - Click để bỏ đánh dấu`
-                          : isSelectedButNotSaved
-                          ? `Ghế ${seat} - Đang chọn để đánh dấu - Click để bỏ`
-                          : `Ghế ${seat} - Còn trống - Click để đánh dấu, Double-click để đặt vé nhanh`
-                      }
-                    >
-                      <span style={{ fontSize: 14, fontWeight: 700 }}>{seat}</span>
-                      <span style={{ fontSize: 9 }}>
-                        {isBooked ? "🔒 Đã đặt" : isSelectedButNotSaved ? "⭐ Đang chọn" : "✅ Trống"}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-              <div style={{ marginTop: 12, padding: "10px", background: "#f9fafb", borderRadius: 8, fontSize: 13 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 15, flexWrap: "wrap", marginBottom: 8 }}>
-                  <span style={{ color: "#6b7280", fontWeight: 700 }}>■</span> Đã đặt (booking thật hoặc đã đánh dấu)
-                  <span style={{ color: "#10b981", fontWeight: 700 }}>■</span> Còn trống
-                  <span style={{ color: "#f59e0b", fontWeight: 700 }}>■</span> Đang chọn để đánh dấu (chưa lưu)
+        {/* Modals */}
+        <AnimatePresence>
+          {/* View Booking Modal */}
+          {selectedBooking && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" onClick={() => setSelectedBooking(null)}>
+              <motion.div 
+                initial={{ scale: 0.95, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.95, opacity: 0 }}
+                className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto"
+                onClick={e => e.stopPropagation()}
+              >
+                <div className="p-6 border-b border-slate-100 flex justify-between items-center sticky top-0 bg-white z-10">
+                  <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
+                    <Ticket className="text-blue-600" /> Chi tiết vé xe
+                  </h2>
+                  <button onClick={() => setSelectedBooking(null)} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
+                    <X size={20} className="text-slate-500" />
+                  </button>
                 </div>
-                <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid #e5e7eb", color: "#666" }}>
-                  {(() => {
-                    // Tính số ghế đang chọn nhưng chưa lưu
-                    const markedSeatsBooked = tripBookingsOfSelected
-                      .filter((b) => b.hoTen === "_MARKED_SEATS_" && b.sdt === "_PARTNER_MARKED_")
-                      .flatMap((b) => (Array.isArray(b.soGhe) ? b.soGhe.map(String) : []));
-                    const selectedButNotSaved = tripSelectedSeats.filter(seat => !markedSeatsBooked.includes(seat));
-                    
-                    return (
-                      <>
-                        <strong>Tóm tắt:</strong> Tổng <strong>{tripForManage.soGhe || 20}</strong> ghế — 
-                        Đã đặt <strong style={{ color: "#ef4444" }}>{tripBookedSeats.length}</strong> — 
-                        Còn trống <strong style={{ color: "#10b981" }}>{(tripForManage.soGhe || 20) - tripBookedSeats.length}</strong> — 
-                        {selectedButNotSaved.length > 0 && (
-                          <>Đang chọn <strong style={{ color: "#f59e0b" }}>{selectedButNotSaved.length}</strong> để đánh dấu (chưa lưu)</>
-                        )}
-                      </>
-                    );
-                  })()}
+                
+                <div className="p-6 space-y-6">
+                  {selectedBooking.tripId && (selectedBooking.tripId as any).hinhAnh && (
+                    <img
+                      src={`http://localhost:5000${(selectedBooking.tripId as any).hinhAnh}`}
+                      alt="Trip"
+                      className="w-full h-48 object-cover rounded-xl shadow-sm"
+                    />
+                  )}
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="space-y-4">
+                      <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
+                        <h3 className="font-semibold text-slate-800 mb-3 flex items-center gap-2">
+                          <User size={16} className="text-blue-600" /> Thông tin khách hàng
+                        </h3>
+                        <div className="space-y-2 text-sm">
+                          <p className="flex justify-between"><span className="text-slate-500">Họ tên:</span> <span className="font-medium">{selectedBooking.hoTen}</span></p>
+                          <p className="flex justify-between"><span className="text-slate-500">SĐT:</span> <span className="font-medium">{selectedBooking.sdt}</span></p>
+                          <p className="flex justify-between"><span className="text-slate-500">Ghế:</span> <span className="font-medium text-blue-600">{(selectedBooking.soGhe || []).join(", ")}</span></p>
+                        </div>
+                      </div>
+
+                      <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
+                        <h3 className="font-semibold text-slate-800 mb-3 flex items-center gap-2">
+                          <CreditCard size={16} className="text-emerald-600" /> Thanh toán
+                        </h3>
+                        <div className="space-y-2 text-sm">
+                          <p className="flex justify-between"><span className="text-slate-500">Tổng tiền:</span> <span className="font-bold text-lg text-emerald-600">{(selectedBooking.totalPrice || 0).toLocaleString()}₫</span></p>
+                          <p className="flex justify-between items-center"><span className="text-slate-500">Phương thức:</span> <span className="px-2 py-1 bg-white rounded border border-slate-200 text-xs">{getPaymentMethodDisplay(selectedBooking.paymentMethod).label}</span></p>
+                          <p className="flex justify-between items-center"><span className="text-slate-500">Trạng thái:</span> <span className="px-2 py-1 bg-white rounded border border-slate-200 text-xs">{getPaymentStatusDisplay(selectedBooking.paymentStatus).label}</span></p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="space-y-4">
+                      <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
+                        <h3 className="font-semibold text-slate-800 mb-3 flex items-center gap-2">
+                          <MapPin size={16} className="text-amber-600" /> Chuyến xe
+                        </h3>
+                        <div className="space-y-2 text-sm">
+                          <p className="font-medium text-slate-900">{(selectedBooking.tripId as any)?.tenChuyen}</p>
+                          <p className="text-slate-500">{(selectedBooking.tripId as any)?.tu} → {(selectedBooking.tripId as any)?.den}</p>
+                          <p className="text-slate-500 flex items-center gap-1">
+                            <Calendar size={14} />
+                            {new Date((selectedBooking.tripId as any)?.ngayKhoiHanh || Date.now()).toLocaleDateString("vi-VN")}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="bg-white p-4 rounded-xl border border-slate-200">
+                        <h3 className="font-semibold text-slate-800 mb-3 text-sm">Sơ đồ ghế chuyến này</h3>
+                        <div className="grid grid-cols-5 gap-2">
+                          {Array.from({ length: getSeatCount((selectedBooking.tripId as any) || null) }, (_, i) =>
+                            (i + 1).toString()
+                          ).map((seat) => {
+                            const booked = selectedBookingTripBookedSeats.includes(seat);
+                            const isMySeat = (selectedBooking.soGhe || []).includes(seat);
+                            return (
+                              <div
+                                key={seat}
+                                className={`
+                                  h-8 rounded flex items-center justify-center text-xs font-bold
+                                  ${isMySeat ? "bg-blue-600 text-white ring-2 ring-blue-200" : 
+                                    booked ? "bg-slate-300 text-slate-500" : "bg-emerald-100 text-emerald-600"}
+                                `}
+                              >
+                                {seat}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
-              </div>
+              </motion.div>
             </div>
           )}
-        </div>
 
-        {/* ======================
-              Existing UI (giữ nguyên)
-          ====================== */}
-        <div style={styles.header}>
-          <h1 style={styles.title}>🚍 Quản lý vé đối tác</h1>
-          <p style={styles.subtitle}>Theo dõi tình trạng đặt vé & chuyến xe</p>
-        </div>
-
-        <div style={styles.card}>
-          <table style={styles.table}>
-            <thead>
-              <tr>
-                <th style={styles.th}>👤 Khách hàng</th>
-                <th style={styles.th}>📞 Liên hệ</th>
-                <th style={styles.th}>💺 Ghế</th>
-                <th style={styles.th}>💰 Tổng tiền</th>
-                    <th style={styles.th}>⚙️ Trạng thái</th>
-                    <th style={styles.th}>🔧 Thao tác</th>
-              </tr>
-            </thead>
-            <tbody>
-              {bookings.length > 0 ? (
-                bookings
-                  .filter((b) => !(b.hoTen === "_MARKED_SEATS_" && b.sdt === "_PARTNER_MARKED_")) // Loại trừ booking đánh dấu
-                  .map((b) => (
-                  <tr key={b._id} style={styles.tr}>
-                    <td style={styles.td}>{b.hoTen}</td>
-                    <td style={styles.td}>{b.sdt}</td>
-                    <td style={{ ...styles.td, color: "#1976d2" }}>{(b.soGhe || []).join(", ")}</td>
-                    <td style={styles.td}>{(b.totalPrice || 0).toLocaleString()}₫</td>
-                    <td style={styles.td}>
-                      <button
-                        onClick={() => handleTogglePaymentStatus(b)}
-                        style={{
-                          ...styles.status,
-                          ...(b.status === "paid" ? styles.statusPaid : styles.statusUnpaid),
-                          cursor: "pointer",
-                          border: "none",
-                        }}
-                        title={`Click để ${b.status === "paid" ? "hủy" : "xác nhận"} thanh toán`}
-                      >
-                        {b.status === "paid" ? "✅ Đã thanh toán" : "⌛ Chưa thanh toán"}
-                      </button>
-                    </td>
-                    <td style={styles.td}>
-                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                        <button onClick={() => handleViewBooking(b)} style={styles.viewBtn}>
-                          👁️ Xem
-                        </button>
-                        <button
-                          onClick={() => openEditBooking(b)}
-                          style={{ ...styles.viewBtn, background: "linear-gradient(135deg,#f59e0b,#d97706)" }}
-                        >
-                          ✏️ Sửa
-                        </button>
-                        <button
-                          onClick={() => handleDeleteBooking(b._id)}
-                          style={{ ...styles.viewBtn, background: "linear-gradient(135deg,#ef4444,#dc2626)" }}
-                        >
-                          🗑️ Xóa
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
-              ) : (
-                <tr>
-                  <td colSpan={6} style={styles.empty}>
-                    🚫 Không có vé nào
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        {/* Modal xem chi tiết booking */}
-        {selectedBooking && (
-          <div
-            style={styles.modalOverlay}
-            onClick={() => {
-              setSelectedBooking(null);
-              setSelectedBookingTripBookedSeats([]);
-            }}
-          >
-            <div style={styles.modalContent} onClick={(e) => e.stopPropagation()}>
-              <button
-                style={styles.closeBtn}
-                onClick={() => {
-                  setSelectedBooking(null);
-                  setSelectedBookingTripBookedSeats([]);
-                }}
+          {/* Edit Booking Modal */}
+          {editBooking && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" onClick={() => setEditBooking(null)}>
+              <motion.div 
+                initial={{ scale: 0.95, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden"
+                onClick={e => e.stopPropagation()}
               >
-                ✕
-              </button>
-              <h2 style={styles.modalTitle}>Chi tiết vé xe</h2>
-
-              {selectedBooking.tripId && (selectedBooking.tripId as any).hinhAnh && (
-                <img
-                  src={`http://localhost:5000${(selectedBooking.tripId as any).hinhAnh}`}
-                  alt="Trip"
-                  style={styles.image}
-                />
-              )}
-
-              <div style={styles.modalGrid}>
-                <div style={styles.modalBox}>
-                  <h3 style={styles.sectionTitle}>👤 Khách hàng</h3>
-                  <p>
-                    <strong>Tên:</strong> {selectedBooking.hoTen}
-                  </p>
-                  <p>
-                    <strong>SĐT:</strong> {selectedBooking.sdt}
-                  </p>
-                  <p>
-                    <strong>Ghế đã đặt:</strong>{" "}
-                    <span style={styles.badge}>{(selectedBooking.soGhe || []).join(", ")}</span>
-                  </p>
-                  <p>
-                    <strong>Tổng tiền:</strong> {(selectedBooking.totalPrice || 0).toLocaleString()}₫
-                  </p>
+                <div className="p-6 border-b border-slate-100 flex justify-between items-center">
+                  <h2 className="text-xl font-bold text-slate-800">Chỉnh sửa ghế</h2>
+                  <button onClick={() => setEditBooking(null)} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
+                    <X size={20} className="text-slate-500" />
+                  </button>
                 </div>
 
-                <div style={styles.modalBox}>
-                  <h3 style={styles.sectionTitle}>🚌 Chuyến xe</h3>
-                  <p>
-                    <strong>Tên chuyến:</strong> {(selectedBooking.tripId as any)?.tenChuyen}
-                  </p>
-                  <p>
-                    <strong>Tuyến:</strong> {(selectedBooking.tripId as any)?.tu} → {(selectedBooking.tripId as any)?.den}
-                  </p>
-                  <p>
-                    <strong>Ngày khởi hành:</strong>{" "}
-                    {new Date((selectedBooking.tripId as any)?.ngayKhoiHanh || Date.now()).toLocaleDateString("vi-VN")}
-                  </p>
-                  <p>
-                    <strong>Giá vé:</strong> {( (selectedBooking.tripId as any)?.giaVe || "-" )?.toString() }₫
-                  </p>
-                </div>
+                <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-8">
+                  <div>
+                    <p className="font-semibold text-slate-700 mb-4">Chọn ghế mới</p>
+                    <div className="grid grid-cols-5 gap-3">
+                      {Array.from({ length: (editBooking.tripId as any)?.soGhe || 20 }, (_, i) => (i + 1).toString()).map(
+                        (seat) => {
+                          const lockedByOthers = editBookingLockedSeats.includes(seat) && !(editBooking.soGhe || []).includes(seat);
+                          const isSelected = editBookingSelectedSeats.includes(seat);
+                          return (
+                            <button
+                              key={seat}
+                              disabled={lockedByOthers}
+                              onClick={() => toggleEditBookingSeat(seat)}
+                              className={`
+                                h-10 rounded-lg font-bold text-sm transition-all
+                                ${lockedByOthers ? "bg-slate-100 text-slate-300 cursor-not-allowed" : 
+                                  isSelected ? "bg-blue-600 text-white shadow-md scale-105" : "bg-slate-100 text-slate-600 hover:bg-blue-50 hover:text-blue-600"}
+                              `}
+                            >
+                              {seat}
+                            </button>
+                          );
+                        }
+                      )}
+                    </div>
+                  </div>
 
-                <div style={styles.modalBox}>
-                  <h3 style={styles.sectionTitle}>💺 Sơ đồ ghế (trip)</h3>
-                  <div style={styles.seatContainer}>
-                    {Array.from({ length: getSeatCount((selectedBooking.tripId as any) || null) }, (_, i) =>
-                      (i + 1).toString()
-                    ).map((seat) => {
-                      // Ghế đã đặt (từ API getBookedSeats)
-                      const booked = selectedBookingTripBookedSeats.includes(seat);
-                      // Ghế của booking hiện tại
-                      const isMySeat = (selectedBooking.soGhe || []).includes(seat);
-                      return (
-                        <div
-                          key={seat}
-                          style={{
-                            ...styles.seat,
-                            backgroundColor: booked ? (isMySeat ? "#1976d2" : "#ef5350") : "#81c784",
-                            color: "white",
-                          }}
-                          title={booked ? (isMySeat ? `Ghế ${seat} - Vé của bạn` : `Ghế ${seat} - Đã được đặt`) : `Ghế ${seat} - Còn trống`}
-                        >
-                          {seat}
+                  <div className="space-y-6">
+                    <div className="bg-slate-50 p-5 rounded-xl border border-slate-100">
+                      <h3 className="font-semibold text-slate-800 mb-4">Thông tin cập nhật</h3>
+                      <div className="space-y-3 text-sm">
+                        <div className="flex justify-between">
+                          <span className="text-slate-500">Khách hàng:</span>
+                          <span className="font-medium">{editBooking.hoTen}</span>
                         </div>
-                      );
-                    })}
-                  </div>
-                  <div style={{ marginTop: 12, fontSize: 12, color: "#555" }}>
-                    <span style={{ color: "#1976d2", fontWeight: 700 }}>■</span> Ghế của vé này
-                    <span style={{ marginLeft: 12, color: "#ef5350", fontWeight: 700 }}>■</span> Đã được đặt (khác)
-                    <span style={{ marginLeft: 12, color: "#81c784", fontWeight: 700 }}>■</span> Còn trống
+                        <div className="flex justify-between">
+                          <span className="text-slate-500">Ghế hiện tại:</span>
+                          <span className="font-medium">{(editBooking.soGhe || []).join(", ")}</span>
+                        </div>
+                        <div className="flex justify-between pt-3 border-t border-slate-200">
+                          <span className="text-slate-500">Ghế mới:</span>
+                          <span className="font-bold text-blue-600">{editBookingSelectedSeats.join(", ") || "Chưa chọn"}</span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-slate-500">Tổng tiền mới:</span>
+                          <span className="font-bold text-xl text-emerald-600">
+                            {((editBookingSelectedSeats.length * ((editBooking.tripId as any)?.giaVe || 0)) || 0).toLocaleString()}₫
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex gap-3">
+                      <button
+                        onClick={() => setEditBooking(null)}
+                        className="flex-1 py-2.5 rounded-xl border border-slate-300 text-slate-600 font-medium hover:bg-slate-50 transition-colors"
+                      >
+                        Hủy bỏ
+                      </button>
+                      <button
+                        onClick={saveEditBooking}
+                        className="flex-1 py-2.5 rounded-xl bg-blue-600 text-white font-medium hover:bg-blue-700 shadow-sm hover:shadow transition-all"
+                      >
+                        Lưu thay đổi
+                      </button>
+                    </div>
                   </div>
                 </div>
-              </div>
+              </motion.div>
             </div>
-          </div>
-        )}
+          )}
 
-        {/* Modal chỉnh ghế cho 1 booking */}
-        {editBooking && (
-          <div
-            style={{
-              position: "fixed",
-              inset: 0,
-              background: "rgba(0,0,0,0.6)",
-              display: "flex",
-              justifyContent: "center",
-              alignItems: "center",
-              zIndex: 1100,
-            }}
-            onClick={() => setEditBooking(null)}
-          >
-            <div
-              style={{ width: "720px", maxWidth: "95%", background: "#fff", borderRadius: 12, padding: 18 }}
-              onClick={(e) => e.stopPropagation()}
-            >
-              <h3 style={{ marginTop: 0 }}>✏️ Chỉnh ghế - {editBooking.hoTen}</h3>
-
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                <div style={{ padding: 12, borderRadius: 8, border: "1px solid #e5e7eb" }}>
-                  <p style={{ margin: 0, fontWeight: 700 }}>Sơ đồ ghế (khóa: ghế đã đặt bởi khác)</p>
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 8, marginTop: 10 }}>
-                    {Array.from({ length: (editBooking.tripId as any)?.soGhe || 20 }, (_, i) => (i + 1).toString()).map(
-                      (seat) => {
-                        const lockedByOthers =
-                          editBookingLockedSeats.includes(seat) && !(editBooking.soGhe || []).includes(seat);
-                        const isSelected = editBookingSelectedSeats.includes(seat);
-                        return (
-                          <button
-                            key={seat}
-                            disabled={lockedByOthers}
-                            onClick={() => toggleEditBookingSeat(seat)}
-                            style={{
-                              padding: "8px 0",
-                              borderRadius: 8,
-                              border: "none",
-                              color: lockedByOthers ? "#9ca3af" : "#fff",
-                              background: lockedByOthers ? "#e5e7eb" : isSelected ? "#2563eb" : "#10b981",
-                              cursor: lockedByOthers ? "not-allowed" : "pointer",
-                            }}
-                          >
-                            {seat}
-                          </button>
-                        );
-                      }
-                    )}
-                  </div>
+          {/* Quick Book Modal */}
+          {quickBookModal && quickBookSeat && tripForManage && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" onClick={() => !quickBookLoading && setQuickBookModal(false)}>
+              <motion.div 
+                initial={{ scale: 0.95, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden"
+                onClick={e => e.stopPropagation()}
+              >
+                <div className="bg-blue-600 p-6 text-white">
+                  <h2 className="text-xl font-bold flex items-center gap-2">
+                    <Ticket /> Đặt vé nhanh
+                  </h2>
+                  <p className="text-blue-100 text-sm mt-1">Nhập thông tin khách hàng cho ghế {quickBookSeat}</p>
                 </div>
 
-                <div style={{ padding: 12, borderRadius: 8, border: "1px solid #e5e7eb" }}>
-                  <p style={{ margin: 0, fontWeight: 700 }}>Thông tin</p>
-                  <div style={{ marginTop: 8 }}>
-                    <p style={{ margin: "8px 0" }}>
-                      <strong>Ghế hiện tại:</strong> {(editBooking.soGhe || []).join(", ")}
-                    </p>
-                    <p style={{ margin: "8px 0" }}>
-                      <strong>Ghế đã chọn mới:</strong> {editBookingSelectedSeats.join(", ") || "Chưa chọn"}
-                    </p>
-                    <p style={{ margin: "8px 0" }}>
-                      <strong>Tổng tiền mới:</strong>{" "}
-                      {((editBookingSelectedSeats.length * ((editBooking.tripId as any)?.giaVe || 0)) || 0).toLocaleString()}
-                      ₫
-                    </p>
+                <div className="p-6 space-y-5">
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1">Tên khách hàng <span className="text-red-500">*</span></label>
+                      <div className="relative">
+                        <User className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                        <input
+                          type="text"
+                          value={quickBookHoTen}
+                          onChange={(e) => setQuickBookHoTen(e.target.value)}
+                          placeholder="Nhập họ tên"
+                          className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                          disabled={quickBookLoading}
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1">Số điện thoại <span className="text-red-500">*</span></label>
+                      <div className="relative">
+                        <Phone className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                        <input
+                          type="tel"
+                          value={quickBookSdt}
+                          onChange={(e) => setQuickBookSdt(e.target.value)}
+                          placeholder="Nhập số điện thoại"
+                          className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                          disabled={quickBookLoading}
+                        />
+                      </div>
+                    </div>
                   </div>
-                  <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+
+                  <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 space-y-2 text-sm">
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Chuyến:</span>
+                      <span className="font-medium">{tripForManage.tenChuyen}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Ghế:</span>
+                      <span className="font-bold text-blue-600 text-lg">{quickBookSeat}</span>
+                    </div>
+                    <div className="flex justify-between pt-2 border-t border-slate-200 mt-2">
+                      <span className="text-slate-500 font-medium">Thành tiền:</span>
+                      <span className="font-bold text-red-600 text-lg">{tripForManage.giaVe?.toLocaleString()}₫</span>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-3 pt-2">
                     <button
-                      onClick={() => setEditBooking(null)}
-                      style={{ flex: 1, padding: 10, borderRadius: 8, border: "none", background: "#9ca3af", color: "#fff" }}
+                      onClick={() => setQuickBookModal(false)}
+                      disabled={quickBookLoading}
+                      className="flex-1 py-3 rounded-xl border border-slate-300 text-slate-600 font-medium hover:bg-slate-50 transition-colors"
                     >
                       Hủy
                     </button>
                     <button
-                      onClick={saveEditBooking}
-                      style={{ flex: 1, padding: 10, borderRadius: 8, border: "none", background: "#10b981", color: "#fff" }}
+                      onClick={handleQuickBook}
+                      disabled={quickBookLoading || !quickBookHoTen.trim() || !quickBookSdt.trim()}
+                      className={`flex-1 py-3 rounded-xl font-medium text-white shadow-sm transition-all flex justify-center items-center gap-2
+                        ${quickBookLoading || !quickBookHoTen.trim() || !quickBookSdt.trim() 
+                          ? "bg-slate-300 cursor-not-allowed" 
+                          : "bg-blue-600 hover:bg-blue-700 hover:shadow-md"}`}
                     >
-                      💾 Lưu thay đổi
+                      {quickBookLoading ? <RefreshCw className="animate-spin" size={18} /> : "Xác nhận đặt"}
                     </button>
                   </div>
                 </div>
-              </div>
+              </motion.div>
             </div>
-          </div>
-        )}
-
-        {/* Modal đặt vé nhanh từ sơ đồ ghế */}
-        {quickBookModal && quickBookSeat && tripForManage && (
-          <div
-            style={{
-              position: "fixed",
-              inset: 0,
-              background: "rgba(0,0,0,0.6)",
-              display: "flex",
-              justifyContent: "center",
-              alignItems: "center",
-              zIndex: 1100,
-            }}
-            onClick={() => {
-              if (!quickBookLoading) {
-                setQuickBookModal(false);
-                setQuickBookSeat(null);
-                setQuickBookHoTen("");
-                setQuickBookSdt("");
-              }
-            }}
-          >
-            <div
-              style={{
-                width: "480px",
-                maxWidth: "95%",
-                background: "#fff",
-                borderRadius: 12,
-                padding: 24,
-                boxShadow: "0 10px 40px rgba(0,0,0,0.2)",
-              }}
-              onClick={(e) => e.stopPropagation()}
-            >
-              <h3 style={{ marginTop: 0, marginBottom: 20, color: "#1976d2", fontSize: 20 }}>
-                🎫 Đặt vé nhanh - Ghế {quickBookSeat}
-              </h3>
-
-              <div style={{ marginBottom: 16 }}>
-                <label style={{ display: "block", marginBottom: 6, fontWeight: 600, color: "#37474f" }}>
-                  Tên khách hàng <span style={{ color: "#ef4444" }}>*</span>
-                </label>
-                <input
-                  type="text"
-                  value={quickBookHoTen}
-                  onChange={(e) => setQuickBookHoTen(e.target.value)}
-                  placeholder="Nhập tên khách hàng"
-                  style={{
-                    width: "100%",
-                    padding: "10px 12px",
-                    borderRadius: 8,
-                    border: "1px solid #e5e7eb",
-                    fontSize: 14,
-                    outline: "none",
-                  }}
-                  disabled={quickBookLoading}
-                />
-              </div>
-
-              <div style={{ marginBottom: 20 }}>
-                <label style={{ display: "block", marginBottom: 6, fontWeight: 600, color: "#37474f" }}>
-                  Số điện thoại <span style={{ color: "#ef4444" }}>*</span>
-                </label>
-                <input
-                  type="tel"
-                  value={quickBookSdt}
-                  onChange={(e) => setQuickBookSdt(e.target.value)}
-                  placeholder="Nhập số điện thoại (10-11 số)"
-                  style={{
-                    width: "100%",
-                    padding: "10px 12px",
-                    borderRadius: 8,
-                    border: "1px solid #e5e7eb",
-                    fontSize: 14,
-                    outline: "none",
-                  }}
-                  disabled={quickBookLoading}
-                />
-              </div>
-
-              <div style={{ marginBottom: 20, padding: 12, background: "#f9fafb", borderRadius: 8 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
-                  <span style={{ color: "#6b7280" }}>Chuyến:</span>
-                  <strong style={{ color: "#1976d2" }}>{tripForManage.tenChuyen}</strong>
-                </div>
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
-                  <span style={{ color: "#6b7280" }}>Tuyến:</span>
-                  <strong>{tripForManage.tu} → {tripForManage.den}</strong>
-                </div>
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
-                  <span style={{ color: "#6b7280" }}>Ghế:</span>
-                  <strong style={{ color: "#10b981", fontSize: 16 }}>{quickBookSeat}</strong>
-                </div>
-                <div style={{ display: "flex", justifyContent: "space-between", borderTop: "1px solid #e5e7eb", paddingTop: 8, marginTop: 8 }}>
-                  <span style={{ color: "#6b7280", fontWeight: 600 }}>Tổng tiền:</span>
-                  <strong style={{ color: "#ef4444", fontSize: 18 }}>
-                    {tripForManage.giaVe?.toLocaleString() || "0"}₫
-                  </strong>
-                </div>
-              </div>
-
-              <div style={{ display: "flex", gap: 12 }}>
-                <button
-                  onClick={() => {
-                    if (!quickBookLoading) {
-                      setQuickBookModal(false);
-                      setQuickBookSeat(null);
-                      setQuickBookHoTen("");
-                      setQuickBookSdt("");
-                    }
-                  }}
-                  disabled={quickBookLoading}
-                  style={{
-                    flex: 1,
-                    padding: 12,
-                    borderRadius: 8,
-                    border: "none",
-                    background: quickBookLoading ? "#e5e7eb" : "#9ca3af",
-                    color: "#fff",
-                    fontWeight: 600,
-                    cursor: quickBookLoading ? "not-allowed" : "pointer",
-                  }}
-                >
-                  Hủy
-                </button>
-                <button
-                  onClick={handleQuickBook}
-                  disabled={quickBookLoading || !quickBookHoTen.trim() || !quickBookSdt.trim()}
-                  style={{
-                    flex: 1,
-                    padding: 12,
-                    borderRadius: 8,
-                    border: "none",
-                    background: quickBookLoading || !quickBookHoTen.trim() || !quickBookSdt.trim() ? "#c7d2fe" : "#4f46e5",
-                    color: "#fff",
-                    fontWeight: 600,
-                    cursor: quickBookLoading || !quickBookHoTen.trim() || !quickBookSdt.trim() ? "not-allowed" : "pointer",
-                  }}
-                >
-                  {quickBookLoading ? "Đang đặt vé..." : "✅ Xác nhận đặt vé"}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
+          )}
+        </AnimatePresence>
+      </motion.div>
     );
   }
 
-  /* Styles (giữ gần giống file gốc) */
-  const styles: { [key: string]: React.CSSProperties } = {
-    container: {
-      minHeight: "100vh",
-      background: "linear-gradient(135deg, #90caf9 0%, #e3f2fd 50%, #ffffff 100%)",
-      padding: "2.5rem",
-      fontFamily: "'Poppins', sans-serif",
-    },
-    header: { textAlign: "center", marginBottom: "1.5rem" },
-    title: {
-      fontSize: "2rem",
-      fontWeight: 800,
-      color: "#0d47a1",
-    },
-    subtitle: { color: "#607d8b", fontSize: "0.95rem", marginTop: "0.3rem" },
-    card: {
-      background: "#fff",
-      borderRadius: 12,
-      boxShadow: "0 10px 25px rgba(0,0,0,0.08)",
-      overflow: "hidden",
-    },
-    table: { width: "100%", borderCollapse: "collapse" },
-    th: {
-      background: "#e3f2fd",
-      color: "#0d47a1",
-      padding: "12px 14px",
-      textAlign: "left",
-      fontWeight: 700,
-      fontSize: 14,
-    },
-    td: { padding: "10px 14px", fontSize: 13, color: "#37474f" },
-    tr: { borderBottom: "1px solid #f1f1f1" },
-    empty: {
-      textAlign: "center",
-      padding: "2rem",
-      color: "#90a4ae",
-      fontStyle: "italic",
-    },
-    viewBtn: {
-      background: "linear-gradient(135deg, #42a5f5, #1976d2)",
-      color: "#fff",
-      border: "none",
-      borderRadius: 8,
-      padding: "6px 12px",
-      cursor: "pointer",
-      fontWeight: 600,
-    },
-    status: { padding: "6px 10px", borderRadius: 12, fontSize: 12, fontWeight: 700 },
-    statusPaid: { background: "#e8f5e9", color: "#2e7d32" },
-    statusUnpaid: { background: "#ffebee", color: "#c62828" },
-    modalOverlay: {
-      position: "fixed",
-      inset: 0,
-      background: "rgba(0,0,0,0.45)",
-      display: "flex",
-      justifyContent: "center",
-      alignItems: "center",
-      zIndex: 999,
-    },
-    modalContent: {
-      background: "#fff",
-      borderRadius: 12,
-      padding: "1rem",
-      width: "92%",
-      maxWidth: 820,
-      maxHeight: "85vh",
-      overflowY: "auto",
-      position: "relative",
-    },
-    modalTitle: {
-      textAlign: "center",
-      fontSize: "1.3rem",
-      color: "#1565c0",
-      marginBottom: "0.8rem",
-      fontWeight: 700,
-    },
-    image: {
-      width: "100%",
-      borderRadius: 8,
-      objectFit: "cover",
-      height: 140,
-      marginBottom: 12,
-    },
-    modalGrid: { display: "grid", gridTemplateColumns: "1fr", gap: "1rem" },
-    modalBox: {
-      background: "#f5faff",
-      borderRadius: 10,
-      padding: "0.8rem",
-      border: "1px solid #bbdefb",
-    },
-    closeBtn: {
-      position: "absolute",
-      top: 8,
-      right: 8,
-      border: "none",
-      background: "#ef5350",
-      color: "white",
-      borderRadius: "50%",
-      width: 30,
-      height: 30,
-      cursor: "pointer",
-    },
-    sectionTitle: {
-      color: "#1976d2",
-      marginBottom: "0.5rem",
-      fontSize: 14,
-      fontWeight: 700,
-    },
-    badge: {
-      background: "#bbdefb",
-      color: "#0d47a1",
-      padding: "3px 8px",
-      borderRadius: 6,
-      fontWeight: 600,
-    },
-    seatContainer: {
-      display: "grid",
-      gridTemplateColumns: "repeat(5, 1fr)",
-      gap: 8,
-      justifyItems: "center",
-      paddingTop: 6,
-    },
-    seat: {
-      width: 36,
-      height: 36,
-      borderRadius: 8,
-      display: "flex",
-      justifyContent: "center",
-      alignItems: "center",
-      fontWeight: 700,
-      fontSize: 13,
-      color: "white",
-      cursor: "default",
-    },
-    loadingScreen: {
-      display: "flex",
-      flexDirection: "column",
-      alignItems: "center",
-      justifyContent: "center",
-      height: "60vh",
-      background: "#e3f2fd",
-      borderRadius: 12,
-      padding: 20,
-    },
-    spinner: {
-      width: 50,
-      height: 50,
-      border: "6px solid #bbdefb",
-      borderTop: "6px solid #1e88e5",
-      borderRadius: "50%",
-      animation: "spin 1s linear infinite",
-    },
-    loadingText: { marginTop: 12, color: "#1565c0", fontWeight: 600 },
-  };
+

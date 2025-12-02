@@ -1,9 +1,10 @@
-import React, { useState } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { signOut } from "firebase/auth";
 import { auth } from "../firebase/config";
 import AdminMenu from "./menu/AdminMenu";
 import { LogOut, LayoutDashboard, UserCircle } from "lucide-react";
+import { useRoleGuard } from "../hooks/useRoleGuard";
 
 // Import các trang chức năng
 import AdminUserManagement from "./Admin/AdminUserManagement";
@@ -15,14 +16,11 @@ import AdminSystemMonitor from "./Admin/AdminSystemMonitor";
 export default function HomeAdmin() {
   const navigate = useNavigate();
   const [activePage, setActivePage] = useState("dashboard");
-  const [user, setUser] = useState<any>(null);
+  const user = useRoleGuard("admin");
 
-  React.useEffect(() => {
-    const storedUser = localStorage.getItem("user");
-    if (storedUser) {
-      setUser(JSON.parse(storedUser));
-    }
-  }, []);
+  if (!user) {
+    return null;
+  }
 
   const doSignOut = async () => {
     await signOut(auth);
@@ -177,7 +175,7 @@ export default function HomeAdmin() {
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
-            {user && (
+            {user ? (
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                 <div style={{ textAlign: 'right' }}>
                   <div style={{ color: '#f8fafc', fontWeight: '600', fontSize: '14px' }}>{user.ten || "Admin"}</div>
@@ -204,7 +202,7 @@ export default function HomeAdmin() {
                   <UserCircle size={40} color="#60a5fa" />
                 </div>
               </div>
-            )}
+            ) : null}
             <button
               onClick={doSignOut}
               style={styles.logoutBtn}

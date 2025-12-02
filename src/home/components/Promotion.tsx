@@ -130,7 +130,7 @@ export default function Promotion() {
         fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
       }}
     >
-      <div style={{ maxWidth: "1200px", margin: "0 auto" }}>
+      <div style={{ maxWidth: "1900px", margin: "0 auto" }}>
         <h2
           style={{
             color: "#e5ebe9ff",

@@ -3,6 +3,7 @@ import {
   getAuth,
   signOut,
   onAuthStateChanged,
+  updateProfile,
 } from "firebase/auth";
 import { doc, getDoc, updateDoc } from "firebase/firestore";
 import { useNavigate } from "react-router-dom";
@@ -236,6 +237,15 @@ export default function PartnerProfile() {
       const userRef = doc(db, "users", user.uid);
       const newData = { ...profile, photoURL: previewImage };
       await updateDoc(userRef, newData);
+
+      // Đồng bộ displayName của Firebase Auth với hồ sơ để toàn bộ hệ thống dùng chung
+      if (newData.name && newData.name.trim()) {
+        await updateProfile(user, { displayName: newData.name.trim() });
+        setUser((prev: any) =>
+          prev ? { ...prev, displayName: newData.name.trim() } : prev
+        );
+      }
+
       // Không dùng updateProfile cho photoURL vì base64 quá dài
       setProfile(newData);
       setEditing(false);
